@@ -1,0 +1,63 @@
+// サンプルアプリ（API とバッチを 1 つのプロジェクトに同居させた最小構成）
+// 版はここで固定する。上げるときは CI が通ることを確認してから。
+plugins {
+    id 'java'
+    id 'jacoco'
+    id 'org.springframework.boot' version '4.0.7'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '0.1.0'
+
+// 本番・CI は Java 17。ローカルが 21 でも 17 向けにコンパイルする（21 固有の API を使わせない）
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-parameters']
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:4.0.1'
+    implementation platform('software.amazon.awssdk:bom:2.29.0')
+    implementation 'software.amazon.awssdk:s3'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.karatelabs:karate-junit5:1.5.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// 単体テスト（DB・外部サービス不要）。API テスト（Karate）は起動中のアプリが要るので除外する
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'karate'
+    }
+    finalizedBy jacocoTestReport
+}
+
+// API テスト: アプリを起動してから ./gradlew karateTest
+tasks.register('karateTest', Test) {
+    description = 'Karate による API テスト（アプリを先に起動しておく）'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'karate'
+    }
+    systemProperty 'karate.env', System.getProperty('karate.env', 'local')
+    outputs.upToDateWhen { false }
+}
+
+jacocoTestReport {
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}

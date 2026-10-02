@@ -1,0 +1,6 @@
+# コピーして backend.hcl を作る（環境ごとに 1 つ。値はチームの管理者に確認）
+bucket         = "<your-tfstate-bucket>"
+key            = "dev1/terraform.tfstate"
+region         = "ap-northeast-1"
+dynamodb_table = "<your-tfstate-lock-table>"
+encrypt        = true

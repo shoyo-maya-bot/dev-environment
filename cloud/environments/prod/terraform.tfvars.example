@@ -1,0 +1,4 @@
+# コピーして terraform.tfvars を作る（実値はコミットしない）
+app_image   = "<account-id>.dkr.ecr.ap-northeast-1.amazonaws.com/sample-app:<tag>"
+bucket_name = "<your-unique-bucket-name>-prod"
+# job0001_schedule = "cron(0 2 * * ? *)"   # 毎日 2:00（日本時間）

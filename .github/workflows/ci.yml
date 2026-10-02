@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sample-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sample-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew build --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            sample-app/build/reports/tests/
+            sample-app/build/reports/jacoco/
+
+  local-compose:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: local
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose up -d --wait --wait-timeout 180
+      - name: Check initial data and S3 upload
+        run: |
+          docker compose exec -T db psql -U app -d sampledb -tAc "SELECT count(*) FROM member" | grep -qx 2
+          ./scripts/upload-sample.sh
+      - if: failure()
+        run: docker compose logs
+      - run: docker compose down -v
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive cloud
+      - name: validate
+        run: |
+          for d in cloud/environments/dev1 cloud/environments/stg cloud/environments/prod cloud/simple; do
+            echo "::group::$d"
+            terraform -chdir=$d init -backend=false -input=false
+            terraform -chdir=$d validate
+            echo "::endgroup::"
+          done
