@@ -1,0 +1,2 @@
+# コピーして terraform.tfvars を作る
+allowed_http_cidrs = ["<your-office-ip>/32"]
