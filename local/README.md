@@ -150,6 +150,7 @@ cd ../sample-app
 | `port is already allocated` | 5432 / 9090 / 8080 を別のソフトが使っている | `.env` の `DB_PORT` / `S3_PORT` を変える（アプリ側は `DB_URL` / `S3_ENDPOINT` も合わせる） |
 | `./gradlew` が証明書エラー | 社内プロキシの SSL 検査 | 社内の CA 証明書を Java の cacerts に取り込む（情報システム部門の手順に従う） |
 | `Connection refused`（DB） | コンテナが起動していない / healthy 前に接続した | `docker compose ps` で healthy を確認 |
+| API が 503・`APPE0008`「ただいま処理できません」を返す | DB につながらない（コンテナが止まっている・起動中）。アプリのログに `APPE0008 依存先につながりません` と原因が出る | `docker compose up -d --wait` で DB を起動し、もう一度呼ぶ（アプリの再起動は不要） |
 | ログの日本語が文字化けする | Java 17 は Windows の既定の文字コード（MS932）でログを出す。`chcp 65001` にすると逆に化ける | `chcp` は既定（932）のまま起動する。ログをファイルに保存したときは Shift_JIS（MS932）で開く |
 | `docker` が `timed out dialing Hyper-V socket` になる（起動直後から、または数分後） | Rancher Desktop 1.23.1 / 1.24.0 の不具合（docker の死活確認の URL を新しい curl が拒否する。[#10780](https://github.com/rancher-sandbox/rancher-desktop/issues/10780)） | devtools-workspace の `install-prereqs.cmd` を実行する（回避策を置く）か、下の「回避策」を手で置いて Rancher Desktop を再起動する |
 | `upload-sample.ps1` が「Security Warning: Script Execution Risk」で止まる | 古い版のスクリプト（`-UseBasicParsing` なし） | `git pull` で最新にする。止まったときは `Y` で進めてよい |
