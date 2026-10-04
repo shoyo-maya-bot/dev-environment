@@ -43,6 +43,7 @@ tasks.named('test') {
 }
 
 // API テスト: アプリを起動してから ./gradlew karateTest
+// 接続先を変えるとき: ./gradlew karateTest -Dkarate.env=dev -DbaseUrl=https://<your-dev-host>
 tasks.register('karateTest', Test) {
     description = 'Karate による API テスト（アプリを先に起動しておく）'
     group = 'verification'
@@ -52,6 +53,10 @@ tasks.register('karateTest', Test) {
         includeTags 'karate'
     }
     systemProperty 'karate.env', System.getProperty('karate.env', 'local')
+    // Gradle に渡した -DbaseUrl は、そのままではテストの JVM に届かないので明示的に渡す
+    if (System.getProperty('baseUrl')) {
+        systemProperty 'baseUrl', System.getProperty('baseUrl')
+    }
     outputs.upToDateWhen { false }
 }
 
