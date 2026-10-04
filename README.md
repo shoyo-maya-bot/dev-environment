@@ -11,9 +11,9 @@ Java（Spring Boot + MyBatis）開発の **ローカル開発環境** と **ク�
 |---|---|---|
 | [local/](local/README.md) | Windows 11 での開発環境の作り方（WSL2・Rancher Desktop・Corretto・VS Code）、DB と S3 エミュレータの `docker-compose.yml` | ✅ 新しく参加した人はここから |
 | [sample-app/](sample-app/) | 動作確認と教材用のサンプル（会員 API、注文ファイル取込バッチ、単体テスト、Karate の API テスト） | ローカル環境ができたら |
+| [cloud/](cloud/README.md) | AWS の構成と Terraform（ECS Fargate・Aurora・S3・SQS・Step Functions）、簡易環境（EC2 + RDS） | クラウド環境を触る人 |
 
 > 教材（learning-materials）の演習は、弱いところを直す前のコードを残した **`exercise-base` ブランチ** で解きます。`main` は修正済みです（`git diff exercise-base main -- sample-app` で直し方を比べられます）。
-| [cloud/](cloud/README.md) | AWS の構成と Terraform（ECS Fargate・Aurora・S3・SQS・Step Functions）、簡易環境（EC2 + RDS） | クラウド環境を触る人 |
 
 ## 技術スタック
 
