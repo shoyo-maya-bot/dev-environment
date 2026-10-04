@@ -1,0 +1,18 @@
+# 依存の更新を月 1 回、PR で提案する（マージ前に CI とレビューを通す）
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: monthly}
+  - package-ecosystem: gradle
+    directory: /sample-app
+    schedule: {interval: monthly}
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directory: /local
+    schedule: {interval: monthly}
+    open-pull-requests-limit: 5
+  - package-ecosystem: terraform
+    directory: /cloud/environments/dev1
+    schedule: {interval: monthly}
+    open-pull-requests-limit: 5
