@@ -30,7 +30,7 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'io.karatelabs:karate-junit5:1.5.1'
+    testImplementation 'io.karatelabs:karate-junit5:1.5.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
