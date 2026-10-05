@@ -1,0 +1,85 @@
+name: exercise-base
+
+# 教材（learning-materials）が使う exercise-base ブランチが、教材の手順どおりに動くことを確かめる.
+#   - ./gradlew build が通る（教材 10-05: BUILD SUCCESSFUL）
+#   - API・Karate・取込バッチが教材に書いた結果を返す
+#   - 演習で見つけてもらう弱いところが、直されずに残っている（教材の前提が崩れていない）
+# exercise-base には workflow を置かないので、main のこのファイルから ref を指定して取り出す.
+# 依存やイメージの変化で壊れたことに気づけるよう、週 1 回も実行する.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "37 21 * * 0" # 毎週月曜 06:37（日本時間）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exercise-base:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JAR: exercise/sample-app/build/libs/sample-app-0.1.0.jar
+    steps:
+      # 確認用のスクリプトは main のものを使う
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: exercise-base
+          path: exercise
+      - name: Show exercise-base commit
+        run: git -C exercise log -1 --format='%H %s'
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: corretto
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - name: Build and unit tests (must pass)
+        working-directory: exercise/sample-app
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e-logs"
+          ./gradlew build --no-daemon 2>&1 | tee "$RUNNER_TEMP/e2e-logs/gradle-build.log"
+      - name: Start DB and S3 emulator
+        working-directory: exercise/local
+        run: |
+          cp .env.example .env
+          docker compose up -d --wait --wait-timeout 180
+          ./scripts/upload-sample.sh
+      - name: Start API
+        run: .github/scripts/e2e.sh start "$JAR"
+      - name: API checks (curl)
+        run: .github/scripts/e2e.sh api exercise-base
+      - name: Karate API tests
+        working-directory: exercise/sample-app
+        run: ./gradlew karateTest --no-daemon 2>&1 | tee "$RUNNER_TEMP/e2e-logs/gradle-karateTest.log"
+      - name: Batch JOB0001 (exit codes)
+        run: .github/scripts/e2e.sh batch "$JAR" exercise-base
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          (cd exercise/local && docker compose logs --no-color > "$RUNNER_TEMP/e2e-logs/compose.log" 2>&1) || true
+          .github/scripts/annotate-tail.sh 60 "$RUNNER_TEMP/e2e-logs"/*.log
+      - if: always()
+        run: .github/scripts/e2e.sh stop
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: exercise-base-logs
+          path: |
+            ${{ runner.temp }}/e2e-logs/
+            exercise/sample-app/build/reports/tests/
+            exercise/sample-app/build/karate-reports/
+          if-no-files-found: ignore
+      - if: always()
+        working-directory: exercise/local
+        run: docker compose down -v || true
