@@ -38,11 +38,34 @@ Java（Spring Boot + MyBatis）開発の **ローカル開発環境** と **ク�
 
 ## このリポジトリの CI
 
-push と PR のたびに GitHub Actions で次を確認します（[.github/workflows/ci.yml](.github/workflows/ci.yml)）。
+GitHub Actions で、ビルドが通るだけでなく、アプリが DB・S3 エミュレータとつながって実際に動くことまで確認します。
+main への push と PR のたびに動き、イメージや依存の変化に気づけるよう週 1 回（月曜の朝）も動きます。
 
-- サンプルアプリのビルドと単体テスト（Java 17）
-- `local/docker-compose.yml` で DB と S3 エミュレータが healthy まで起動すること
-- Terraform の書式（`terraform fmt`）と構文（`terraform validate`）
+[ci.yml](.github/workflows/ci.yml)
+
+| ジョブ | 確認すること |
+|---|---|
+| sample-app | ビルドと単体テスト（Java 17、`./gradlew build`） |
+| local-compose | `local/docker-compose.yml` の DB と S3 エミュレータが healthy まで起動し、初期データとサンプル CSV が置けること |
+| e2e | local の DB・S3 エミュレータにつないでアプリを起動し、次を確かめる |
+| terraform | Terraform の書式（`terraform fmt`）と構文（`terraform validate`） |
+
+e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
+
+- curl で API を呼び、照会 200・登録 201・重複 409（APPE0003）・存在しない会員 404（APPE0002）・入力誤り 400（APPE0001）が返る
+- Karate の API テスト（`./gradlew karateTest`）が通る
+- 取込バッチ JOB0001 が終了コード 4 で終わり、2 回目は二重に取り込まない。存在しないジョブ ID は終了コード 8（APPE0006）
+- DB を止めると API が 503（APPE0008）を返し、DB を戻すと再起動なしで 200 に戻る
+
+[exercise-base.yml](.github/workflows/exercise-base.yml)
+
+教材が使う `exercise-base` ブランチを取り出して、教材の手順どおりに動くことを確かめます（main への push と週 1 回）。
+
+- `./gradlew build` が通る
+- API・Karate・取込バッチが、教材に書いた結果を返す
+- 演習で見つけてもらう弱いところが残っている（型違いの 400 が `ErrorResponse` の形にならない、存在しないジョブ ID でも終了コード 0）。ここが落ちたら、`exercise-base` が変わって教材の前提が崩れています
+
+失敗したときは、ログの末尾が Actions の画面に注釈（エラー）として出ます。全体のログとテスト結果は、実行結果の Artifacts からダウンロードできます。
 
 ## 関連リポジトリ
 
