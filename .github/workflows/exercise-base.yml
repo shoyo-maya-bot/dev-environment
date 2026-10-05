@@ -62,6 +62,8 @@ jobs:
       - name: Karate API tests
         working-directory: exercise/sample-app
         run: ./gradlew karateTest --no-daemon 2>&1 | tee "$RUNNER_TEMP/e2e-logs/gradle-karateTest.log"
+      - name: Karate results (at least one scenario)
+        run: .github/scripts/e2e.sh karate-check exercise/sample-app/build/test-results/karateTest
       - name: Batch JOB0001 (exit codes)
         run: .github/scripts/e2e.sh batch "$JAR" exercise-base
       - name: Show logs on failure

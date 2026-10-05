@@ -102,6 +102,8 @@ jobs:
       - name: Karate API tests
         working-directory: sample-app
         run: ./gradlew karateTest --no-daemon -DbaseUrl=http://localhost:8080 2>&1 | tee "$RUNNER_TEMP/e2e-logs/gradle-karateTest.log"
+      - name: Karate results (at least one scenario)
+        run: .github/scripts/e2e.sh karate-check sample-app/build/test-results/karateTest
       - name: Batch JOB0001 (exit codes)
         run: .github/scripts/e2e.sh batch "$JAR" main
       - name: DB down returns 503 (APPE0008)
