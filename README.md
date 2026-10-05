@@ -74,3 +74,8 @@ Actions はコミットの SHA で固定しています（横にバージョン�
 - [ai-coding](https://github.com/shoyo-maya-bot/ai-coding): 設計書から AI でコードと単体テストを作る仕組み（このリポジトリの構成を前提にする）
 - [learning-materials](https://github.com/shoyo-maya-bot/learning-materials): 新人向け教材（sample-app を教材に使う）
 - [devtools-workspace](https://github.com/shoyo-maya-bot/devtools-workspace): ツール一覧と一括セットアップ
+
+## セキュリティ・ライセンス
+
+- 脆弱性を見つけたら、公開の Issue ではなく [SECURITY.md](SECURITY.md) の方法で知らせてください
+- ライセンスは [MIT](LICENSE) です
