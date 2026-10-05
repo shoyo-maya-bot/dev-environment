@@ -5,6 +5,7 @@
 #   e2e.sh api      main|exercise-base   API を curl で呼んで、ステータスとメッセージ ID を確かめる
 #   e2e.sh batch    <jar> main|exercise-base   取込バッチを jar で動かし、終了コードとログを確かめる
 #   e2e.sh db-down  <local のディレクトリ>  DB を止めた状態で、API が 503 + APPE0008 を返すことを確かめる（main のみ）
+#   e2e.sh karate-check <dir>    Karate のテストが 1 件以上通ったことを確かめる
 #   e2e.sh stop                  API を止める
 #
 # ログは $LOG_DIR（既定は $RUNNER_TEMP/e2e-logs）に残す. 失敗時は annotate-tail.sh で注釈に出す.
@@ -60,6 +61,22 @@ cmd_start() {
   fail "API が 180 秒以内に応答しませんでした"
 }
 
+# Karate の結果（JUnit XML）にテストが 1 件以上あり、失敗が無いことを確かめる（0 件で「成功」に見えるのを防ぐ）
+cmd_karate_check() {
+  local dir=${1:?test-results/karateTest のディレクトリ}
+  local tests=0 failures=0 f t e r
+  for f in "$dir"/*.xml; do
+    [ -f "$f" ] || continue
+    t=$(grep -o '<testsuite [^>]*' "$f" | sed -nE 's/.* tests="([0-9]+)".*/\1/p' | head -1)
+    e=$(grep -o '<testsuite [^>]*' "$f" | sed -nE 's/.* failures="([0-9]+)".*/\1/p' | head -1)
+    r=$(grep -o '<testsuite [^>]*' "$f" | sed -nE 's/.* errors="([0-9]+)".*/\1/p' | head -1)
+    tests=$((tests + ${t:-0})); failures=$((failures + ${e:-0} + ${r:-0}))
+  done
+  [ "$tests" -gt 0 ] || fail "Karate のテストが 1 件も実行されていません（$dir）"
+  [ "$failures" -eq 0 ] || fail "Karate のテストが $failures 件失敗しました"
+  echo "::notice title=Karate::$tests 件のシナリオが通りました"
+}
+
 cmd_stop() {
   if [ -f "$LOG_DIR/app.pid" ]; then
     kill "$(cat "$LOG_DIR/app.pid")" 2>/dev/null || true
@@ -98,6 +115,7 @@ cmd_api() {
       *'"messageId"'*) fail "exercise-base で型違いが ErrorResponse の形になっています（教材の前提が崩れています）: $BODY" ;;
     esac
   fi
+  echo "::notice title=API ($mode)::curl での確認が通りました"
 }
 
 # run_batch <名前> <jar> <引数...> → BATCH_EXIT を設定する
@@ -134,6 +152,7 @@ cmd_batch() {
     # exercise-base は演習のため 0 のまま（教材 30-13 の前提）
     [ "$BATCH_EXIT" = 0 ] || fail "exercise-base で存在しないジョブ ID の終了コードが 0 ではなく $BATCH_EXIT でした（教材の前提が崩れています）"
   fi
+  echo "::notice title=Batch ($mode)::JOB0001 は 4 → 4、存在しないジョブ ID は $BATCH_EXIT"
 }
 
 cmd_db_down() {
@@ -146,7 +165,10 @@ cmd_db_down() {
   (cd "$compose_dir" && docker compose start db)
   for _ in $(seq 1 30); do
     call GET "$API/1"
-    [ "$STATUS" = 200 ] && return 0
+    if [ "$STATUS" = 200 ]; then
+      echo "::notice title=DB down::503 + APPE0008 を返し、DB を戻すと 200 に戻りました"
+      return 0
+    fi
     sleep 2
   done
   fail "DB を戻した後も API が 200 を返しませんでした"
@@ -159,5 +181,6 @@ case "$sub" in
   api)     cmd_api "$@" ;;
   batch)   cmd_batch "$@" ;;
   db-down) cmd_db_down "$@" ;;
+  karate-check) cmd_karate_check "$@" ;;
   *) fail "不明なサブコマンド: $sub" ;;
 esac
