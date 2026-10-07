@@ -1,17 +1,19 @@
 # 環境 prod の構成。環境ごとの違いは locals の値だけにする（構造は全環境で同じ）
 locals {
-  name               = "${var.system_name}-prod"
-  enable_nat_gateway = true
-  db_instance_count  = 2
-  protect_data       = true
-  api_desired_count  = 2
+  name                 = "${var.system_name}-prod"
+  enable_nat_gateway   = true
+  db_instance_count    = 2
+  protect_data         = true
+  api_desired_count    = 2
+  enable_vpc_endpoints = false
 }
 
 module "network" {
-  source             = "../../modules/network"
-  name               = local.name
-  cidr_block         = var.vpc_cidr
-  enable_nat_gateway = local.enable_nat_gateway
+  source               = "../../modules/network"
+  name                 = local.name
+  cidr_block           = var.vpc_cidr
+  enable_nat_gateway   = local.enable_nat_gateway
+  enable_vpc_endpoints = local.enable_vpc_endpoints
 }
 
 module "bucket" {
