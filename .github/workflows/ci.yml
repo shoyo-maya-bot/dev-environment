@@ -69,6 +69,15 @@ jobs:
         working-directory: sample-app
         shell: cmd
         run: gradlew.bat build --no-daemon
+      # 版の照合スクリプトとそのテストが Windows でも動くこと（PYTHONUTF8: 日本語の出力で落ちないように）
+      - name: check_versions (Windows)
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python -m unittest discover -s .github/scripts -v
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python .github/scripts/check_versions.py
       # Windows 11 に最初から入っている Windows PowerShell 5.1 で構文エラーが無いこと（pwsh 7 だけで書ける構文を使っていないか）
       - name: Parse PowerShell scripts (Windows PowerShell 5.1)
         shell: powershell
@@ -106,6 +115,9 @@ jobs:
           persist-credentials: false
       - run: python3 -m unittest discover -s .github/scripts -v
       - run: python3 .github/scripts/check_versions.py
+      # SAST（bandit. 中以上）. スクリプトは標準ライブラリだけで依存が無いため、pip-audit は流さない
+      - run: pip install "bandit==1.8.6"
+      - run: bandit -q -r .github/scripts -ll
 
   # local/docker-compose.yml の DB と S3 エミュレータが起動し、初期データが入ること
   local-compose:

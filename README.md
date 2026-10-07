@@ -53,7 +53,7 @@ main への push と PR のたびに動き、イメージや依存の変化に�
 | local-compose | `local/docker-compose.yml` の DB と S3 エミュレータが healthy まで起動し、初期データとサンプル CSV が置けること。`.env` でポートを変えてもスクリプトが追随すること、ポートが `127.0.0.1` だけで待ち受けること |
 | e2e | local の DB・S3 エミュレータにつないでアプリを起動し、次を確かめる |
 | terraform | Terraform の書式（`terraform fmt`）、構文（`terraform validate`。`.terraform.lock.hcl` どおりの provider で）、tflint、trivy config（IaC のセキュリティ検査。受け入れた指摘は [cloud/.trivyignore](cloud/.trivyignore) に理由付き） |
-| versions | README に書いた版（Java・Spring Boot・MyBatis・Gradle）がビルドファイルと一致すること（[.github/scripts/check_versions.py](.github/scripts/check_versions.py)） |
+| versions | README に書いた版（Java・Spring Boot・MyBatis・Gradle）がビルドファイルと一致すること（[.github/scripts/check_versions.py](.github/scripts/check_versions.py)。Windows でも実行）。スクリプトの bandit |
 
 e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
 
