@@ -47,11 +47,10 @@ run_quotes() { # <label>
   if [ -f "$work/learning-materials/dev-environment-pin.json" ]; then
     args=(--ref main=HEAD --ref exercise-base=origin/exercise-base)
   fi
-  {
-    python "$work/learning-materials/scripts/check_code_quotes.py" --repo-dir "$work/up-$1" "${args[@]}"
-    python "$work/learning-materials/scripts/check_versions.py" --repo-dir "$work/up-$1" "${args[@]}"
-  } >"$work/quotes-$1.txt" 2>&1
-  echo "quotes[$1] exit=$?"
+  local q=0 v=0
+  python "$work/learning-materials/scripts/check_code_quotes.py" --repo-dir "$work/up-$1" "${args[@]}" >"$work/quotes-$1.txt" 2>&1 || q=$?
+  python "$work/learning-materials/scripts/check_versions.py" --repo-dir "$work/up-$1" "${args[@]}" >>"$work/quotes-$1.txt" 2>&1 || v=$?
+  echo "quotes[$1] check_code_quotes exit=$q / check_versions exit=$v"
 }
 
 # 指摘の行（ai-coding は "  - "、learning-materials は "NG " で始まる）のうち、head だけにあるもの
