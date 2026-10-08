@@ -29,8 +29,8 @@ import org.springframework.stereotype.Component;
  * <p>入力は全体をメモリに読み（上限 {@code app.batch.max-input-bytes}。{@link DefaultFileFetcher}）、ファイル全体を 1 トランザクションで登録する
  * （local/README.md の「取込の大きさとコミットの単位」）。
  */
-@Component
 @Profile("batch")
+@Component
 @ConditionalOnProperty(name = "app.batch.job", havingValue = "JOB0001")
 public class OrderImportJob implements BatchJob, ApplicationRunner, ExitCodeGenerator {
 
