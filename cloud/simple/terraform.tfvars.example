@@ -1,2 +1,3 @@
 # コピーして terraform.tfvars を作る
+# allowed_http_cidrs: 接続元の IPv4 の CIDR（例: 203.0.113.10/32）. 0.0.0.0/0（インターネット全体）は validation で弾かれる
 allowed_http_cidrs = ["<your-office-ip>/32"]
