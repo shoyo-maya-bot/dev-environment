@@ -8,7 +8,9 @@ updates:
     directory: /sample-app
     schedule: {interval: monthly}
     open-pull-requests-limit: 5
-  - package-ecosystem: docker
+  # local/ には Dockerfile が無く docker-compose.yml だけなので、docker ではなく docker-compose を使う
+  # （docker だと「Dockerfile が見つからない」で失敗する）. イメージは タグ@sha256:digest で固定しており、タグと digest を一緒に更新する
+  - package-ecosystem: docker-compose
     directory: /local
     schedule: {interval: monthly}
     open-pull-requests-limit: 5
