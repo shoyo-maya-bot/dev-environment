@@ -19,11 +19,14 @@ Java（Spring Boot + MyBatis）開発の **ローカル開発環境** と **ク�
 
 | 区分 | 採用 |
 |---|---|
-| 言語・FW | Java 17、Spring Boot 4.0、MyBatis（mybatis-spring-boot-starter 4.0） |
-| ビルド | Gradle 8.14（Wrapper で固定） |
+| 言語・FW | Java 17、Spring Boot 4.1、MyBatis（mybatis-spring-boot-starter 4.1） |
+| ビルド | Gradle 9.8（Wrapper で固定。配布物の SHA-256 も照合） |
 | テスト | JUnit 5、Mockito、AssertJ、Spring MockMvc、Karate（API テスト）、JaCoCo（カバレッジ） |
 | ローカル | Rancher Desktop（dockerd）、PostgreSQL 16、S3 互換エミュレータ |
 | クラウド | AWS（ECS Fargate、Aurora PostgreSQL、S3、SQS、Step Functions、EventBridge Scheduler、Secrets Manager）、Terraform |
+
+版は `main` ブランチのもので、[sample-app/build.gradle](sample-app/build.gradle) と [gradle-wrapper.properties](sample-app/gradle/wrapper/gradle-wrapper.properties) が正です
+（メジャー.マイナーまで書き、CI の `versions` ジョブがずれを検出します）。教材が使う `exercise-base` ブランチは版が古いことがあります。
 
 ## サンプルアプリの決まりごと（他のリポジトリと共通）
 
@@ -45,10 +48,12 @@ main への push と PR のたびに動き、イメージや依存の変化に�
 
 | ジョブ | 確認すること |
 |---|---|
-| sample-app | ビルドと単体テスト（Java 17、`./gradlew build`） |
-| local-compose | `local/docker-compose.yml` の DB と S3 エミュレータが healthy まで起動し、初期データとサンプル CSV が置けること |
+| sample-app | ビルドと単体テスト（Java 17、`./gradlew build`）。Gradle Wrapper の jar が公式のものかも確かめる |
+| windows | Windows（`windows-latest`）で `gradlew.bat build` が通ること、PowerShell スクリプトの構文（Windows PowerShell 5.1 で読めるか）と PSScriptAnalyzer |
+| local-compose | `local/docker-compose.yml` の DB と S3 エミュレータが healthy まで起動し、初期データとサンプル CSV が置けること。`.env` でポートを変えてもスクリプトが追随すること、ポートが `127.0.0.1` だけで待ち受けること |
 | e2e | local の DB・S3 エミュレータにつないでアプリを起動し、次を確かめる |
-| terraform | Terraform の書式（`terraform fmt`）と構文（`terraform validate`） |
+| terraform | Terraform の書式（`terraform fmt`）、構文（`terraform validate`。`.terraform.lock.hcl` どおりの provider で）、tflint、trivy config（IaC のセキュリティ検査。受け入れた指摘は [cloud/.trivyignore](cloud/.trivyignore) に理由付き） |
+| versions | README に書いた版（Java・Spring Boot・MyBatis・Gradle）がビルドファイルと一致すること（[.github/scripts/check_versions.py](.github/scripts/check_versions.py)。Windows でも実行）。スクリプトの bandit |
 
 e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
 
@@ -68,6 +73,16 @@ e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
 Actions はコミットの SHA で固定しています（横にバージョンをコメントで書いています）。権限は読み取りだけで、チェックアウトした認証情報は残しません。
 
 失敗したときは、ログの末尾が Actions の画面に注釈（エラー）として出ます。全体のログとテスト結果は、実行結果の Artifacts からダウンロードできます。
+
+## 変更点
+
+利用者の手順や動きが変わるものだけを書きます。
+
+| 時期 | 変更 | 影響 |
+|---|---|---|
+| 2026-10 | `local/docker-compose.yml` の DB・S3 エミュレータを `127.0.0.1` だけで待ち受けるようにした | ほかの PC から、この PC の DB（5432）・S3 エミュレータ（9090）にはつながらなくなった（意図どおり） |
+| 2026-10 | `local/scripts/upload-sample.*` が `local/.env` の `S3_PORT`・`S3_BUCKET` を読むようにした | `.env` でポートを変えた人は、環境変数を別に渡さなくてよくなった（環境変数があればそちらが優先） |
+| 2026-10 | `cloud/` の dev1 に VPC エンドポイントを追加し、Step Functions の IAM の対象を ARN に絞った。`.terraform.lock.hcl` をコミット | dev1 を apply すると、エンドポイントの費用（月 約 100 USD の目安）がかかる。provider の版はロックファイルどおりになる |
 
 ## 関連リポジトリ
 

@@ -12,7 +12,16 @@ updates:
     directory: /local
     schedule: {interval: monthly}
     open-pull-requests-limit: 5
+  # provider の版は各環境の versions.tf と .terraform.lock.hcl で固定している。全環境・簡易環境・モジュールを対象にする
   - package-ecosystem: terraform
-    directory: /cloud/environments/dev1
+    directories:
+      - /cloud/environments/dev1
+      - /cloud/environments/stg
+      - /cloud/environments/prod
+      - /cloud/simple
+      - /cloud/modules/*
     schedule: {interval: monthly}
     open-pull-requests-limit: 5
+    groups:
+      terraform-providers:
+        patterns: ["*"]

@@ -38,6 +38,8 @@ jobs:
         with:
           distribution: corretto
           java-version: "17"
+      # gradle-wrapper.jar が公式のものか（チェックサムを Gradle の公開値と照合）
+      - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
       - run: ./gradlew build --no-daemon 2>&1 | tee "$RUNNER_TEMP/gradle-build.log"
       - if: failure()
@@ -50,6 +52,73 @@ jobs:
             sample-app/build/reports/tests/
             sample-app/build/reports/jacoco/
 
+  # 手順書（local/README.md）の利用者は Windows. Windows でビルド・単体テストが通り、PowerShell スクリプトが読めること
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: corretto
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - name: gradlew.bat build
+        working-directory: sample-app
+        shell: cmd
+        run: gradlew.bat build --no-daemon
+      # 版の照合スクリプトとそのテストが Windows でも動くこと（PYTHONUTF8: 日本語の出力で落ちないように）
+      - name: check_versions (Windows)
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python -m unittest discover -s .github/scripts -v
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python .github/scripts/check_versions.py
+      # Windows 11 に最初から入っている Windows PowerShell 5.1 で構文エラーが無いこと（pwsh 7 だけで書ける構文を使っていないか）
+      - name: Parse PowerShell scripts (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($f in Get-ChildItem -Path local/scripts -Filter *.ps1 -Recurse) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($e in $errors) {
+              Write-Output "::error file=$($f.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              $failed = $true
+            }
+            Write-Output "parsed: $($f.Name) ($($PSVersionTable.PSVersion))"
+          }
+          if ($failed) { exit 1 }
+      # 書き方の誤り（PSScriptAnalyzer）. Write-Host は利用者に色付きで案内を出すために使っているので除く
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force
+          }
+          $results = Invoke-ScriptAnalyzer -Path local/scripts -Recurse -Severity Warning,Error -ExcludeRule PSAvoidUsingWriteHost
+          $results | Format-Table -AutoSize RuleName, Severity, ScriptName, Line, Message | Out-String -Width 300 | Write-Output
+          foreach ($r in $results) { Write-Output "::error file=local/scripts/$($r.ScriptName),line=$($r.Line)::$($r.RuleName): $($r.Message)" }
+          if ($results) { exit 1 }
+
+  # README に書いた版がビルドファイルと一致すること（Dependabot の更新で README が古いまま残らないように）
+  versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s .github/scripts -v
+      - run: python3 .github/scripts/check_versions.py
+      # SAST（bandit. 中以上）. スクリプトは標準ライブラリだけで依存が無いため、pip-audit は流さない
+      - run: pip install "bandit==1.8.6"
+      - run: bandit -q -r .github/scripts -ll
+
   # local/docker-compose.yml の DB と S3 エミュレータが起動し、初期データが入ること
   local-compose:
     runs-on: ubuntu-latest
@@ -61,12 +130,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: cp .env.example .env
+      # 既定と違うポート・バケット名にして、.env の値にスクリプトが追随することも確かめる
+      - name: Create .env with non-default ports
+        run: |
+          cp .env.example .env
+          sed -i -e 's/^DB_PORT=.*/DB_PORT=15432/' -e 's/^S3_PORT=.*/S3_PORT=19090/' -e 's/^S3_BUCKET=.*/S3_BUCKET=ci-bucket/' .env
       - run: docker compose up -d --wait --wait-timeout 180
-      - name: Check initial data and S3 upload
+      - name: Ports listen on 127.0.0.1 only
+        run: |
+          docker compose port db 5432 | tee /dev/stderr | grep -qx '127.0.0.1:15432'
+          docker compose port s3 9090 | tee /dev/stderr | grep -qx '127.0.0.1:19090'
+      - name: Check initial data and S3 upload (reads S3_PORT and S3_BUCKET from .env)
         run: |
           docker compose exec -T db psql -U app -d sampledb -tAc "SELECT count(*) FROM member" | grep -qx 2
-          ./scripts/upload-sample.sh
+          ./scripts/upload-sample.sh | tee /dev/stderr | grep -qx 'uploaded: s3://ci-bucket/orders.csv'
+          curl -sf "http://127.0.0.1:19090/ci-bucket/orders.csv" | cmp - data/orders.csv
       - if: failure()
         run: |
           docker compose logs --no-color > "$RUNNER_TEMP/compose.log" 2>&1 || true
@@ -142,11 +220,30 @@ jobs:
           persist-credentials: false
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
       - run: terraform fmt -check -recursive cloud
+      # provider はコミットした .terraform.lock.hcl どおりに取得する（-lockfile=readonly: 食い違えば失敗）
       - name: validate
         run: |
           for d in cloud/environments/dev1 cloud/environments/stg cloud/environments/prod cloud/simple; do
             echo "::group::$d"
-            terraform -chdir=$d init -backend=false -input=false
+            terraform -chdir=$d init -backend=false -input=false -lockfile=readonly
             terraform -chdir=$d validate
             echo "::endgroup::"
           done
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: v0.59.1
+      - name: tflint
+        run: tflint --recursive --chdir=cloud --format compact
+      # IaC のセキュリティ検査. 受け入れた指摘は cloud/.trivyignore に理由付きで書く
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.69.3
+          scan-type: config
+          scan-ref: cloud
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: cloud/.trivyignore
+          format: table
+          output: trivy-config.txt
+      - if: always()
+        run: cat trivy-config.txt || true

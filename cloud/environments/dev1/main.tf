@@ -1,17 +1,20 @@
 # 環境 dev1 の構成。環境ごとの違いは locals の値だけにする（構造は全環境で同じ）
+# dev1 は学習・試作用で、本番用ではない。NAT を置かない代わりに VPC エンドポイントで ECR・S3・Secrets Manager などに届かせる（費用は cloud/README.md）
 locals {
-  name               = "${var.system_name}-dev1"
-  enable_nat_gateway = false
-  db_instance_count  = 1
-  protect_data       = false
-  api_desired_count  = 1
+  name                 = "${var.system_name}-dev1"
+  enable_nat_gateway   = false
+  db_instance_count    = 1
+  protect_data         = false
+  api_desired_count    = 1
+  enable_vpc_endpoints = true
 }
 
 module "network" {
-  source             = "../../modules/network"
-  name               = local.name
-  cidr_block         = var.vpc_cidr
-  enable_nat_gateway = local.enable_nat_gateway
+  source               = "../../modules/network"
+  name                 = local.name
+  cidr_block           = var.vpc_cidr
+  enable_nat_gateway   = local.enable_nat_gateway
+  enable_vpc_endpoints = local.enable_vpc_endpoints
 }
 
 module "bucket" {

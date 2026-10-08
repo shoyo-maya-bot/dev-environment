@@ -17,7 +17,7 @@ resource "aws_iam_role" "sfn" {
 data "aws_iam_policy_document" "sfn" {
   statement {
     actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks"]
-    resources = ["*"]
+    resources = [local.task_definition_family_arn, local.task_arn_pattern]
   }
   statement {
     actions   = ["iam:PassRole"]
@@ -25,7 +25,7 @@ data "aws_iam_policy_document" "sfn" {
   }
   statement {
     actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
-    resources = ["*"]
+    resources = [local.ecs_sync_rule_arn]
   }
 }
 
