@@ -3,7 +3,8 @@
 # terraform console で module の output を評価するだけで、AWS にはつながない（plan / apply はしない）.
 #
 # 使い方: dump_batch_workflow.sh <出力先のフォルダ>
-#   → <出力先>/definition-notify-false.json・definition-notify-true.json
+#   → <出力先>/definition-notify-false.json・definition-notify-true.json（job_timeout_seconds は既定）
+#   → <出力先>/definition-timeout-120.json（通知なし. job_timeout_seconds = 120. 変数が定義に届くことを見る）
 #   → python .github/scripts/test_batch_workflow.py がこれを読んで、終了コードごとの行き先を確かめる
 set -euo pipefail
 
@@ -20,7 +21,9 @@ fi
 
 # provider の版は dev1 のロックファイルどおり（-lockfile=readonly）
 cp "$repo/cloud/environments/dev1/.terraform.lock.hcl" "$work/"
-for notify in false true; do
+# <出力名> <create_notification_topic> <job_timeout_seconds の行（空なら既定）>
+for spec in "notify-false|false|" "notify-true|true|" "timeout-120|false|job_timeout_seconds = 120"; do
+  IFS='|' read -r label notify timeout_line <<<"$spec"
   cat >"$work/main.tf" <<HCL
 terraform {
   required_providers {
@@ -45,12 +48,13 @@ module "job" {
   pass_role_arns            = ["arn:aws:iam::123456789012:role/exec", "arn:aws:iam::123456789012:role/task"]
   command                   = ["--app.batch.job=JOB0001", "--input=s3://bucket/inbound/orders.csv"]
   create_notification_topic = $notify
+  $timeout_line
 }
 HCL
   timeout 300 "$tf" -chdir="$work" init -backend=false -input=false -lockfile=readonly >/dev/null
   echo 'jsonencode(module.job.state_machine_definition)' |
     AWS_EC2_METADATA_DISABLED=true timeout 120 "$tf" -chdir="$work" console |
     python3 -c 'import json, sys; json.dump(json.loads(json.loads(sys.stdin.read())), sys.stdout, ensure_ascii=False, indent=2)' \
-      >"$out/definition-notify-$notify.json"
-  echo "wrote $out/definition-notify-$notify.json"
+      >"$out/definition-$label.json"
+  echo "wrote $out/definition-$label.json"
 done

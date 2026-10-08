@@ -4,6 +4,9 @@
 ecs:runTask.sync は 0 以外の終了を States.TaskFailed にするので、警告（4）まで失敗扱いになり、
 逆に結果が成功で返る経路では 8 でも成功扱いになりうる.
 
+後退: RunJob にも状態機械全体にも時間の上限（TimeoutSeconds）が無く、タスクが止まらないと実行が最長 1 年残り、
+失敗の通知も出なかった. RunJob の上限（job_timeout_seconds）を超えたら失敗の経路（通知 → JobFailed）へ進むこと.
+
 定義は terraform console で取り出した JSON（.github/scripts/dump_batch_workflow.sh. AWS にはつながない）を読み、
 使っている範囲の States Language を小さく実行して、終了コードごとの行き先を確かめる.
 BATCH_WORKFLOW_DEFINITIONS（JSON の置き場所）が無いとき（terraform の無い versions・windows ジョブ）は飛ばす.
@@ -96,6 +99,7 @@ def run(definition, ecs, sns_fails=False):
     """定義を実行し、（最後の状態名, 通った状態の一覧, 発行した通知）を返す.
 
     ecs: ("ok", タスクの情報) か ("error", エラー名, Cause（文字列か None））. ecs:runTask.sync の振る舞い.
+         ("hang",) はタスクが終わらない. 状態の TimeoutSeconds があれば States.Timeout になり、無ければ終わらない（例外）.
     """
     states = definition["States"]
     name, data, path, published = definition["StartAt"], {"input": 1}, [], []
@@ -117,6 +121,10 @@ def run(definition, ecs, sns_fails=False):
         assert kind == "Task", kind
         if st["Resource"] == "arn:aws:states:::ecs:runTask.sync":
             outcome = ecs
+            if ecs[0] == "hang":
+                if not st.get("TimeoutSeconds"):
+                    raise AssertionError(f"{name} に TimeoutSeconds が無く、終わらないタスクを待ち続ける")
+                outcome = ("error", "States.Timeout", None)
         elif st["Resource"] == "arn:aws:states:::sns:publish":
             published.append(params(st["Parameters"], data))
             outcome = ("error", "SNS.AuthorizationErrorException", "denied") if sns_fails else ("ok", {"MessageId": "m"})
@@ -210,6 +218,45 @@ class BatchWorkflowTest(unittest.TestCase):
         self.assertEqual(run(d, failed(8), sns_fails=True)[0], "JobFailed")
 
 
+    def test_timeouts(self):
+        for notify in (False, True):
+            with self.subTest(notify=notify):
+                d = self.load(notify)
+                states = d["States"]
+                run_job = states["RunJob"]
+                self.assertEqual(run_job["TimeoutSeconds"], 3600)  # job_timeout_seconds の既定
+                # 全体の上限は、RunJob の上限・起動の再試行の待ち・通知の上限の合計より長い（RunJob の時間切れが先に来て、失敗の経路を通る）
+                retry_wait = sum(r["IntervalSeconds"] * r["BackoffRate"] ** i
+                                 for r in run_job.get("Retry", []) for i in range(r["MaxAttempts"]))
+                notify_max = max((s.get("TimeoutSeconds", 0) for s in states.values()
+                                  if s.get("Resource") == "arn:aws:states:::sns:publish"), default=0)
+                self.assertIsInstance(d.get("TimeoutSeconds"), int)
+                self.assertGreater(d["TimeoutSeconds"], run_job["TimeoutSeconds"] + retry_wait + notify_max)
+                # 外部を呼ぶ Task はすべて上限を持つ
+                for name, st in states.items():
+                    if st["Type"] == "Task":
+                        self.assertGreater(st.get("TimeoutSeconds", 0), 0, name)
+                # 時間切れ → 失敗（通知ありなら FAILED を通知してから）
+                end, path, published = run(d, ("hang",))
+                self.assertEqual(end, "JobFailed", path)
+                if notify:
+                    self.assertEqual(len(published), 1)
+                    self.assertIn("FAILED", published[0]["Subject"])
+                    self.assertIn("States.Timeout", published[0]["Message"])
+                else:
+                    self.assertEqual(published, [])
+
+    def test_timeout_variable(self):
+        p = Path(DEFS or "") / "definition-timeout-120.json"
+        self.assertTrue(p.is_file(), f"{p} がありません（dump_batch_workflow.sh を先に実行）")
+        d = json.loads(p.read_text(encoding="utf-8"))
+        self.assertEqual(d["States"]["RunJob"]["TimeoutSeconds"], 120)
+        default = self.load(False)
+        # 全体の上限も変数に追随する（差は RunJob の上限の差だけ）
+        self.assertEqual(default["TimeoutSeconds"] - d["TimeoutSeconds"], 3600 - 120)
+        self.assertEqual(run(d, ("hang",))[0], "JobFailed")
+
+
 class InterpreterTest(unittest.TestCase):
     """テスト用の小さな実行器そのもの（terraform が無くても動く）."""
 
@@ -219,6 +266,11 @@ class InterpreterTest(unittest.TestCase):
         self.assertFalse(present({"task": task()}, "$.task.Containers[0].ExitCode"))
         with self.assertRaises(KeyError):
             rule_matches({"Variable": "$.error.Cause", "StringMatches": "{*"}, {"error": {}})
+
+    def test_hang_without_timeout_never_ends(self):
+        d = {"StartAt": "R", "States": {"R": {"Type": "Task", "Resource": "arn:aws:states:::ecs:runTask.sync", "End": True}}}
+        with self.assertRaisesRegex(AssertionError, "TimeoutSeconds"):
+            run(d, ("hang",))
 
     def test_string_to_json(self):
         out = params({"value.$": "States.StringToJson($.c)"}, {"c": '{"a": 1}'})

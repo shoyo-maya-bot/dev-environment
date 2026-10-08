@@ -65,11 +65,13 @@ ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はア�
 | 0 | 正常 | 成功（`Succeeded`） | しない |
 | 4 | 警告あり（形式エラーの行を飛ばして取込を続けた） | **成功扱い**（`SucceededWithWarning`） | する（件名に `WARNING`） |
 | 8・その他の 0 以外 | 異常終了 | 失敗（`JobFailed`） | する（件名に `FAILED`） |
-| 取れない | コンテナが起動しなかった・ECS の起動失敗・タイムアウト | 失敗（`JobFailed`） | する |
+| 取れない | コンテナが起動しなかった・ECS の起動失敗・時間の上限を超えた | 失敗（`JobFailed`） | する |
 
 - 通知は SNS トピックに発行します。トピックは `job0001_notification = true` のときだけ作り（既定は作らない）、ARN を出力 `job0001_notification_topic_arn` に出します。
   **購読（メール・Chatbot など）はトピックに別に付けてください**（メールアドレスをコードに書かないため）
 - 通知に失敗しても、ジョブの結果（成功・失敗）は変えません
+- 時間の上限: ジョブ 1 回の実行は `job_timeout_seconds`（モジュールの変数。既定 3600 秒）まで。超えたら ECS タスクを止めて失敗にし、失敗の通知を出します。
+  ジョブフロー全体にも上限（`TimeoutSeconds`。ジョブの上限 + 起動の再試行・通知の分 + 余裕）を付けています。長いジョブは環境の `main.tf` で `job_timeout_seconds` を渡します
 - 警告で止めたい（4 も失敗にしたい）など運用の決まりが違うときは、`state_machine.tf` の `CheckExitCode` を直します
 - CI は、定義を `terraform console` で取り出し、終了コードごとの行き先をテストで確かめます（[.github/scripts/test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)。AWS にはつながない）
 
@@ -187,7 +189,8 @@ SQS を使わないなら `interface_endpoint_services` から外すと、月 �
 | `terraform init -backend=false -lockfile=readonly` → `terraform validate` | 構文と参照（`.terraform.lock.hcl` どおりの provider で） |
 | tflint | 書き方の誤り・非推奨の書き方 |
 | trivy config | IaC のセキュリティ検査（HIGH 以上）。受け入れた指摘は [.trivyignore](.trivyignore) に理由付きで書く |
-| batch-workflow の定義 | `terraform console` で状態機械の定義を取り出し、終了コード 0・4・8 などの行き先と通知の有無をテストする（[dump_batch_workflow.sh](../.github/scripts/dump_batch_workflow.sh)・[test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)） |
+| batch-workflow の定義 | `terraform console` で状態機械の定義を取り出し、終了コード 0・4・8 などの行き先、時間の上限（時間切れは失敗）と通知の有無をテストする（[dump_batch_workflow.sh](../.github/scripts/dump_batch_workflow.sh)・[test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)） |
+| cloud/simple の入力検査 | `allowed_http_cidrs` に `0.0.0.0/0`・`::/0`・CIDR でない値を渡すと誤りになることを `terraform console` で確かめる（[test_simple_variables.py](../.github/scripts/test_simple_variables.py)） |
 
 ### `.terraform.lock.hcl` を作り直すとき
 
