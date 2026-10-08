@@ -15,13 +15,19 @@ variable "vpc_cidr" {
 }
 
 variable "app_image" {
-  description = "アプリのコンテナイメージ（ECR の URI:タグ）。CI がビルドして push したものを指定する"
+  description = "アプリのコンテナイメージ（ECR の URI:タグ）。ビルドと push はこのサンプルの範囲外（cloud/README.md）なので、別に用意したものを指定する"
   type        = string
 }
 
 variable "bucket_name" {
   description = "入出力ファイル用バケット名（全世界で一意）"
   type        = string
+}
+
+variable "job0001_notification" {
+  description = "JOB0001 の警告（終了コード 4）と失敗を通知する SNS トピックを作るか（既定は作らない）"
+  type        = bool
+  default     = false
 }
 
 variable "job0001_schedule" {

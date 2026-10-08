@@ -34,3 +34,9 @@ variable "schedule_expression" {
   type        = string
   default     = null
 }
+
+variable "create_notification_topic" {
+  description = "警告（終了コード 4）と失敗（4 以外の 0 以外など）を通知する SNS トピックを作るか。購読（メールなど）は別に付ける。既定は作らない（通知しない）"
+  type        = bool
+  default     = false
+}

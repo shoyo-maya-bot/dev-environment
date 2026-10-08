@@ -323,6 +323,14 @@ jobs:
             terraform -chdir=$d validate
             echo "::endgroup::"
           done
+      # バッチのジョブフロー（Step Functions）の定義を terraform console で取り出し、終了コードごとの行き先を確かめる
+      # （0 成功 / 4 警告で成功扱い＋通知 / それ以外は失敗. AWS にはつながない. plan・apply はしない）
+      - name: batch-workflow state machine
+        env:
+          BATCH_WORKFLOW_DEFINITIONS: ${{ runner.temp }}/batch-workflow
+        run: |
+          .github/scripts/dump_batch_workflow.sh "$BATCH_WORKFLOW_DEFINITIONS"
+          python3 -m unittest discover -s .github/scripts -p "test_batch_workflow.py" -v
       - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
         with:
           tflint_version: v0.59.1
