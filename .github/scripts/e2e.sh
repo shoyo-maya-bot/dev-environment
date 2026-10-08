@@ -98,6 +98,12 @@ cmd_api() {
   # 同じメールアドレスは 409 + APPE0003
   call POST "$API" "{\"name\":\"CI 会員\",\"email\":\"$email\"}"
   expect 409 '"messageId":"APPE0003"'
+  if [ "$mode" = main ]; then
+    # 409 の応答に、入力したメールアドレスを入れない（登録済みかどうかの値を映さない）
+    case "$BODY" in
+      *"$email"*) fail "409 の応答にメールアドレスが入っています: $BODY" ;;
+    esac
+  fi
   # 存在しない会員は 404 + APPE0002
   call GET "$API/999999999";        expect 404 '"messageId":"APPE0002"'
   # 入力チェック（必須・形式）は 400 + APPE0001
@@ -142,6 +148,16 @@ cmd_batch() {
   run_batch batch-2 "$jar" --app.batch.job=JOB0001 "$input"
   [ "$BATCH_EXIT" = 4 ] || fail "2 回目の終了コードが 4 ではなく $BATCH_EXIT でした"
   grep -q 'imported=0 duplicated=3 errors=1' "$LOG_DIR/batch-2.log" || fail "2 回目の件数が想定と違います"
+
+  if [ "$mode" = main ]; then
+    # 内容の違う重複: 登録済みの A0001 と数量が違う行は取り込まず、終了コード 6 と APPW0002 で知らせる（DB の SQL も確かめる）
+    local conflict_csv="$LOG_DIR/orders-conflict.csv"
+    printf '%s\n' 'order_no,member_id,product_code,quantity' 'A0001,1,P-001,5' '"A0002",1,"P-002",1' > "$conflict_csv"
+    run_batch batch-conflict "$jar" --app.batch.job=JOB0001 "--input=$conflict_csv"
+    [ "$BATCH_EXIT" = 6 ] || fail "内容の違う重複の終了コードが 6 ではなく $BATCH_EXIT でした"
+    grep -q 'imported=0 duplicated=1 errors=0 conflicts=1' "$LOG_DIR/batch-conflict.log" || fail "内容の違う重複の件数が想定と違います"
+    grep -q 'APPW0002 2: order_no A0001' "$LOG_DIR/batch-conflict.log" || fail "APPW0002 のログがありません"
+  fi
 
   # 存在しないジョブ ID
   run_batch batch-unknown "$jar" --app.batch.job=JOB9999
