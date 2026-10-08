@@ -12,6 +12,12 @@ repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# hashicorp/setup-terraform は terraform を Node のラッパーで包む（標準入力を渡す console が止まる）. 本体（terraform-bin）があればそれを使う
+tf=terraform
+if [ -n "${TERRAFORM_CLI_PATH:-}" ] && [ -x "$TERRAFORM_CLI_PATH/terraform-bin" ]; then
+  tf="$TERRAFORM_CLI_PATH/terraform-bin"
+fi
+
 # provider の版は dev1 のロックファイルどおり（-lockfile=readonly）
 cp "$repo/cloud/environments/dev1/.terraform.lock.hcl" "$work/"
 for notify in false true; do
@@ -41,9 +47,9 @@ module "job" {
   create_notification_topic = $notify
 }
 HCL
-  terraform -chdir="$work" init -backend=false -input=false -lockfile=readonly >/dev/null
+  timeout 300 "$tf" -chdir="$work" init -backend=false -input=false -lockfile=readonly >/dev/null
   echo 'jsonencode(module.job.state_machine_definition)' |
-    AWS_EC2_METADATA_DISABLED=true terraform -chdir="$work" console |
+    AWS_EC2_METADATA_DISABLED=true timeout 120 "$tf" -chdir="$work" console |
     python3 -c 'import json, sys; json.dump(json.loads(json.loads(sys.stdin.read())), sys.stdout, ensure_ascii=False, indent=2)' \
       >"$out/definition-notify-$notify.json"
   echo "wrote $out/definition-notify-$notify.json"
