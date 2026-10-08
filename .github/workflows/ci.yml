@@ -40,7 +40,7 @@ jobs:
           java-version: "17"
       # gradle-wrapper.jar が公式のものか（チェックサムを Gradle の公開値と照合）
       - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - run: ./gradlew build --no-daemon 2>&1 | tee "$RUNNER_TEMP/gradle-build.log"
       - if: failure()
         run: ../.github/scripts/annotate-tail.sh 60 "$RUNNER_TEMP/gradle-build.log"
@@ -64,7 +64,7 @@ jobs:
         with:
           distribution: corretto
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: gradlew.bat build
         working-directory: sample-app
         shell: cmd
@@ -261,7 +261,7 @@ jobs:
         with:
           distribution: corretto
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: Start DB and S3 emulator
         working-directory: local
         run: |
