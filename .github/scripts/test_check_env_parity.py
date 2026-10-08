@@ -87,7 +87,8 @@ class EnvParityTest(unittest.TestCase):
 
     def test_crlf_is_ignored(self):
         p = self.tmp / "stg" / "main.tf"
-        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+        # setUp の write_text は Windows では既に CRLF で書く. どちらの OS でも CRLF にそろえてから試す
+        p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
         self.assertEqual(check_env_parity.check(self.tmp), [])
 
 

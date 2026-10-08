@@ -157,6 +157,7 @@ jobs:
             Remove-Item Env:S3_BUCKET
             if ($code -ne 1) { throw "存在しないバケットへの送信が失敗になりません（exit=$code）" }
             Write-Output "OK: upload-sample.ps1（Windows PowerShell 5.1 / pwsh 7）"
+            $global:LASTEXITCODE = 0  # 上でわざと失敗させた終了コード 1 をステップの結果にしない
           } finally {
             Stop-Process -Id $mock.Id -Force -ErrorAction SilentlyContinue
             Remove-Item local/.env -ErrorAction SilentlyContinue
