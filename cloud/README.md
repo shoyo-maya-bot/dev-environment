@@ -11,6 +11,7 @@
 >
 > - この構成は **学習と試作のための雛形で、本番用ではありません**。CI では `terraform fmt`・`validate`・tflint・trivy config までしか確かめておらず、
 >   実際の AWS アカウントへの `plan` / `apply` は試していません。ALB・WAF・監視・バックアップ設計なども含みません
+> - **API を外から呼ぶ入口（ALB など）と、イメージのビルド・ECR への push は作りません**（下の「このサンプルの範囲外」）
 > - `terraform apply` すると、作ったものが **起動しているだけで月額の費用がかかります**（下の「費用の目安について」）。使い終わったら `terraform destroy` してください
 
 ## 構成
@@ -42,6 +43,35 @@ flowchart LR
 | 監視・ログ | CloudWatch Logs / Container Insights | ログとメトリクス | 各モジュール |
 
 ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はアカウント共通の基盤として別管理する想定で、ここには含めていません。
+
+### このサンプルの範囲外（作らないもの）
+
+次の 2 つは、このサンプルの Terraform・CI では **作りません**。使うときは、チームの基盤・パイプラインで用意してください。
+
+| 範囲外 | 今の状態 | 用意するときの例 |
+|---|---|---|
+| **API を外から呼ぶ入口（ALB など）** | API のタスクは private サブネットにあり、セキュリティグループに受信の許可（ingress）がありません。**VPC の外からも、VPC の中の別のリソースからも API には届きません** | ALB（またはアカウント共通の入口）を作り、ターゲットグループに API のサービスを登録し、API のセキュリティグループに ALB からの 8080 を許可する |
+| **コンテナイメージのビルドと ECR への push** | ECR のリポジトリも、イメージをビルドして push するパイプラインもありません。`app_image` には、利用者が別に用意したイメージの URI を指定します | ECR のリポジトリを作り、CI（GitHub Actions など）で `bootJar` → `docker build` → `docker push` し、そのタグを `app_image` に渡す |
+
+そのため、下の「構築の流れ」の 5・6 は、上の 2 つを用意した場合の手順です。バッチ（JOB0001）は入口が要らないので、イメージがあれば Step Functions から動かせます。
+
+## バッチのジョブフロー（終了コードの扱い）
+
+`modules/batch-workflow` の Step Functions は、ECS タスクの終了を待ち、バッチの終了コードで結果を分けます
+（定義は [modules/batch-workflow/state_machine.tf](modules/batch-workflow/state_machine.tf)）。
+
+| 終了コード | 意味（sample-app） | Step Functions の結果 | 通知（`job0001_notification = true` のとき） |
+|---|---|---|---|
+| 0 | 正常 | 成功（`Succeeded`） | しない |
+| 4 | 警告あり（形式エラーの行を飛ばして取込を続けた） | **成功扱い**（`SucceededWithWarning`） | する（件名に `WARNING`） |
+| 8・その他の 0 以外 | 異常終了 | 失敗（`JobFailed`） | する（件名に `FAILED`） |
+| 取れない | コンテナが起動しなかった・ECS の起動失敗・タイムアウト | 失敗（`JobFailed`） | する |
+
+- 通知は SNS トピックに発行します。トピックは `job0001_notification = true` のときだけ作り（既定は作らない）、ARN を出力 `job0001_notification_topic_arn` に出します。
+  **購読（メール・Chatbot など）はトピックに別に付けてください**（メールアドレスをコードに書かないため）
+- 通知に失敗しても、ジョブの結果（成功・失敗）は変えません
+- 警告で止めたい（4 も失敗にしたい）など運用の決まりが違うときは、`state_machine.tf` の `CheckExitCode` を直します
+- CI は、定義を `terraform console` で取り出し、終了コードごとの行き先をテストで確かめます（[.github/scripts/test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)。AWS にはつながない）
 
 ## ディレクトリ
 
@@ -98,8 +128,10 @@ Step Functions と EventBridge Scheduler は AWS 側から ECS を呼ぶので�
 
 3. 差分を確認してレビューを受ける: `terraform plan -out=plan.out`
 4. 承認後に反映: `terraform apply plan.out`（本番はパイプライン経由のみ）
-5. アプリのイメージを ECR に push し、`app_image` を更新して 3〜4 を繰り返す
-6. 疎通確認: API は Karate を `-Dkarate.env=dev -DbaseUrl=<URL>` で実行、バッチは Step Functions の実行結果を見る
+5. アプリのイメージを更新したら、`app_image` を新しいタグにして 3〜4 を繰り返す（イメージのビルドと ECR への push は、このサンプルの範囲外。上の「このサンプルの範囲外」）
+6. 疎通確認:
+   - バッチ: Step Functions の実行（`job0001_state_machine_arn`）を開始し、結果（`Succeeded` / `SucceededWithWarning` / `JobFailed`）と CloudWatch Logs を見る（上の「バッチのジョブフロー」）
+   - API: このサンプルには外からの入口（ALB など）が無いので、そのままでは呼べません。入口を用意したら、Karate を `-Dkarate.env=dev -DbaseUrl=<入口の URL>` で実行します
 
 ## ローカル環境との対応
 
@@ -155,6 +187,7 @@ SQS を使わないなら `interface_endpoint_services` から外すと、月 �
 | `terraform init -backend=false -lockfile=readonly` → `terraform validate` | 構文と参照（`.terraform.lock.hcl` どおりの provider で） |
 | tflint | 書き方の誤り・非推奨の書き方 |
 | trivy config | IaC のセキュリティ検査（HIGH 以上）。受け入れた指摘は [.trivyignore](.trivyignore) に理由付きで書く |
+| batch-workflow の定義 | `terraform console` で状態機械の定義を取り出し、終了コード 0・4・8 などの行き先と通知の有無をテストする（[dump_batch_workflow.sh](../.github/scripts/dump_batch_workflow.sh)・[test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)） |
 
 ### `.terraform.lock.hcl` を作り直すとき
 
