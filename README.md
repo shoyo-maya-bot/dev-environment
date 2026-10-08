@@ -53,6 +53,9 @@ main への push と PR のたびに動き、イメージや依存の変化に�
 | local-compose | `local/docker-compose.yml` の DB と S3 エミュレータが healthy まで起動し、初期データとサンプル CSV が置けること。`.env` でポートを変えてもスクリプトが追随すること、ポートが `127.0.0.1` だけで待ち受けること |
 | e2e | local の DB・S3 エミュレータにつないでアプリを起動し、次を確かめる |
 | terraform | Terraform の書式（`terraform fmt`）、構文（`terraform validate`。`.terraform.lock.hcl` どおりの provider で）、tflint、trivy config（IaC のセキュリティ検査。受け入れた指摘は [cloud/.trivyignore](cloud/.trivyignore) に理由付き） |
+| windows-upload-sample | Windows で `local/scripts/upload-sample.ps1` を Windows PowerShell 5.1 と pwsh 7 で実際に実行する。送り先はジョブ内で起動した PUT だけを受け取るモック（[.github/scripts/s3_put_mock.py](.github/scripts/s3_put_mock.py)）で、AWS にはつながない。`.env` の `S3_PORT`・`S3_BUCKET` を読むこと、失敗時に終了コード 1 になること |
+| env-parity | 環境（dev1 / stg / prod）の差が `main.tf` の `locals` の値と環境名だけであること（[.github/scripts/check_env_parity.py](.github/scripts/check_env_parity.py)） |
+| downstream | PR のときだけ。この PR が写し先・引用先（ai-coding の template、learning-materials の教材）に与える影響を、公開リポジトリを clone して base と head で比べ、増えた指摘を警告と Job Summary に出す（[.github/scripts/downstream.sh](.github/scripts/downstream.sh)）。両者は dev-environment の SHA に固定しているので、マージは止めない（`continue-on-error`） |
 | versions | README に書いた版（Java・Spring Boot・MyBatis・Gradle）がビルドファイルと一致すること（[.github/scripts/check_versions.py](.github/scripts/check_versions.py)。Windows でも実行）。スクリプトの bandit |
 
 e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
