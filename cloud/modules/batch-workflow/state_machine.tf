@@ -3,7 +3,8 @@
 # バッチの終了コード（README の「サンプルアプリの決まりごと」）を見て、結果を分ける:
 #   0         → Succeeded（成功）
 #   4         → 警告あり. 通知して（create_notification_topic = true のとき）SucceededWithWarning（成功扱い）
-#   それ以外  → 通知して（同上）JobFailed（失敗）. 8（異常終了）、終了コードが取れない（コンテナが起動しなかった）、ECS の起動失敗も含む
+#   それ以外  → 通知して（同上）JobFailed（失敗）. 6（内容の違う重複. 人が確かめる）、8（異常終了）、終了コードが取れない（コンテナが起動しなかった）、
+#               ECS の起動失敗も含む
 #
 # ecs:runTask.sync は、コンテナが 0 以外で終わると States.TaskFailed で失敗し、Cause に（文字列にした）タスクの情報が入る.
 # 0 で終わったときは、同じ形のタスクの情報が結果になる. どちらでも $.task に置き、Containers[0].ExitCode を Choice で見る.
@@ -14,8 +15,13 @@
 #   - RunJob の TimeoutSeconds = var.job_timeout_seconds. 超えると States.Timeout で失敗し、Catch（States.ALL）から失敗の通知 → JobFailed へ進む
 #     （Step Functions は runTask.sync のタイムアウトで ECS タスクも止める）
 #   - 通知（sns:publish）にも短い上限（notify_timeout_seconds）. 通知が詰まってもジョブの結果は変えない
-#   - 状態機械全体の TimeoutSeconds は「RunJob の上限 + 起動の再試行の待ち + 通知 + 余裕」. RunJob の上限が必ず先に来るので、
+#   - 状態機械全体の TimeoutSeconds は「RunJob の上限 + 通知 + 余裕」. RunJob の上限が必ず先に来るので、
 #     時間切れは上の失敗の経路（通知あり）で終わる. 全体の上限は、それでも終わらなかったときの最後の歯止め
+#
+# RunJob は再試行しない（Retry を付けない）:
+#   ecs:runTask.sync のエラー（ECS.AmazonECSException など）は、タスクの起動前の失敗か、起動した後（終了を待つ間）の失敗かを
+#   エラー名で区別できない. 起動後の失敗で再試行すると、同じジョブの ECS タスクが 2 つ動く（二重起動）.
+#   失敗は通知（JobFailed）で人に知らせ、原因を確かめてから実行し直す（cloud/README.md の「再試行と多重実行」）
 # 定義の検査: .github/scripts/test_batch_workflow.py（terraform console で値を取り出し、終了コードごとの行き先を確かめる. plan/apply はしない）
 locals {
   # 終了コードの意味（sample-app の BatchJob.OK / WARN と同じ値）
@@ -30,19 +36,10 @@ locals {
 
   # 時間の上限（秒）
   notify_timeout_seconds = 60
-  run_job_retry = {
-    IntervalSeconds = 30
-    MaxAttempts     = 2
-    BackoffRate     = 2
-  }
-  # 起動の再試行の待ちの合計（30 + 60 秒）
-  run_job_retry_wait_seconds = sum([
-    for i in range(local.run_job_retry.MaxAttempts) : local.run_job_retry.IntervalSeconds * pow(local.run_job_retry.BackoffRate, i)
-  ])
-  # 起動の再試行・通知・状態の切り替えの余裕
+  # 起動・通知・状態の切り替えの余裕
   execution_margin_seconds = 600
   execution_timeout_seconds = (
-    var.job_timeout_seconds + local.run_job_retry_wait_seconds + local.notify_timeout_seconds + local.execution_margin_seconds
+    var.job_timeout_seconds + local.notify_timeout_seconds + local.execution_margin_seconds
   )
 
   base_states = {
@@ -69,7 +66,7 @@ locals {
         }
       }
       ResultPath = "$.task"
-      Retry      = [merge({ ErrorEquals = ["ECS.AmazonECSException"] }, local.run_job_retry)]
+      # Retry は付けない（上の「RunJob は再試行しない」. 起動後の失敗での再試行は二重起動になる）
       Catch = [
         # コンテナが 0 以外で終わった（終了コードは Cause の中）
         { ErrorEquals = ["States.TaskFailed"], ResultPath = "$.error", Next = "HasFailureCause" },
@@ -126,7 +123,7 @@ locals {
     JobFailed = {
       Type  = "Fail"
       Error = "JobFailed"
-      Cause = "バッチが 0・4 以外の終了コードで終わったか、起動できないか、時間の上限を超えました（実行の入出力の task・error と CloudWatch Logs を確かめる）"
+      Cause = "バッチが 0・4 以外の終了コードで終わったか、起動できないか、時間の上限を超えました（実行の入出力の task・error と CloudWatch Logs を確かめる. 自動で再試行はしない）"
     }
   }
 
