@@ -105,6 +105,63 @@ jobs:
           foreach ($r in $results) { Write-Output "::error file=local/scripts/$($r.ScriptName),line=$($r.Line)::$($r.RuleName): $($r.Message)" }
           if ($results) { exit 1 }
 
+  # Windows で upload-sample.ps1 を実際に実行する（ドライラン）. 送り先はこのジョブの中で起動した PUT だけを受け取るモック
+  # （.github/scripts/s3_put_mock.py. 127.0.0.1 / ::1 だけで待ち受ける）で、AWS にも S3 エミュレータにもつながない.
+  # Windows 11 の既定の Windows PowerShell 5.1 と pwsh 7 の両方で、.env の S3_PORT・S3_BUCKET を読み、ファイルが届くこと.
+  windows-upload-sample:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Mock tests
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python .github/scripts/test_s3_put_mock.py -v
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Run upload-sample.ps1 against a local mock (no AWS)
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false  # 終了コードは下で自分で確かめる
+          $store = Join-Path $env:RUNNER_TEMP "s3-mock"
+          $ready = Join-Path $env:RUNNER_TEMP "s3-mock.ready"
+          Set-Content -Path local/.env -Encoding UTF8 -Value "S3_PORT=19090", "S3_BUCKET=ci-bucket"
+          $mock = Start-Process python -PassThru -NoNewWindow -ArgumentList ".github/scripts/s3_put_mock.py", "--port", "19090", "--bucket", "ci-bucket", "--out", "`"$store`"", "--ready-file", "`"$ready`""
+          try {
+            for ($i = 0; -not (Test-Path $ready); $i++) {
+              if ($i -ge 50 -or $mock.HasExited) { throw "モックが起動しませんでした" }
+              Start-Sleep -Milliseconds 200
+            }
+            $expected = (Get-FileHash local/data/orders.csv).Hash
+            foreach ($shell in "powershell", "pwsh") {
+              Remove-Item -Recurse -Force $store -ErrorAction SilentlyContinue
+              $out = & $shell -NoProfile -ExecutionPolicy Bypass -File local/scripts/upload-sample.ps1 2>&1 | Out-String
+              Write-Output "[$shell] exit=$LASTEXITCODE $out"
+              if ($LASTEXITCODE -ne 0) { throw "[$shell] upload-sample.ps1 が失敗しました" }
+              if ($out.Trim() -ne "uploaded: s3://ci-bucket/orders.csv") { throw "[$shell] 出力が違います: $out" }
+              $got = Join-Path $store "ci-bucket/orders.csv"
+              if ((Get-FileHash $got).Hash -ne $expected) { throw "[$shell] 届いたファイルが data/orders.csv と違います" }
+            }
+            # 環境変数は .env より優先される. 存在しないバケットに送ると、失敗（終了コード 1）を返すこと
+            $env:S3_BUCKET = "no-such-bucket"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File local/scripts/upload-sample.ps1 *> $null
+            $code = $LASTEXITCODE
+            Remove-Item Env:S3_BUCKET
+            if ($code -ne 1) { throw "存在しないバケットへの送信が失敗になりません（exit=$code）" }
+            Write-Output "OK: upload-sample.ps1（Windows PowerShell 5.1 / pwsh 7）"
+          } finally {
+            Stop-Process -Id $mock.Id -Force -ErrorAction SilentlyContinue
+            Remove-Item local/.env -ErrorAction SilentlyContinue
+          }
+
   # README に書いた版がビルドファイルと一致すること（Dependabot の更新で README が古いまま残らないように）
   versions:
     runs-on: ubuntu-latest
@@ -118,6 +175,42 @@ jobs:
       # SAST（bandit. 中以上）. スクリプトは標準ライブラリだけで依存が無いため、pip-audit は流さない
       - run: pip install "bandit==1.8.6"
       - run: bandit -q -r .github/scripts -ll
+
+  # 環境（dev1 / stg / prod）の差が main.tf の locals の値と環境名だけであること.
+  # ある環境だけにモジュールや引数を足すと、他の環境で試していない構成が本番に入るので失敗にする（terraform は動かさない）
+  env-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/check_env_parity.py
+
+  # 波及先の検査: この PR の head が、ai-coding の template（写し先）と learning-materials の教材（引用先）に与える影響.
+  # 公開リポジトリを clone し、base と head の両方で検査して「この PR で増えた指摘」を警告と Job Summary に出す.
+  # 方針: マージは止めない（continue-on-error. 指摘があってもスクリプトは 0 で終わる）.
+  #   写し先・引用先は dev-environment の SHA に固定しているので、この PR だけでは壊れない. 対応は写し先で SHA を上げるときに行い、
+  #   その手順は写し先が dev-environment のマージ後でないと進められない（ここで止めると順番が詰まる）.
+  #   clone の失敗など検査できなかったときは赤くなるが、continue-on-error なので PR の結果は緑のまま（ログで分かる）.
+  downstream:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: ai-coding（template drift）と learning-materials（引用・版）
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/downstream.sh "$BASE_SHA" "$HEAD_SHA"
 
   # local/docker-compose.yml の DB と S3 エミュレータが起動し、初期データが入ること
   local-compose:
