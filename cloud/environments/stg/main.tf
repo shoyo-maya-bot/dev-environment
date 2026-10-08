@@ -109,4 +109,6 @@ module "job0001" {
   pass_role_arns      = [module.batch.execution_role_arn, module.batch.task_role_arn]
   command             = ["--app.batch.job=JOB0001", "--input=s3://${var.bucket_name}/inbound/orders.csv"]
   schedule_expression = var.job0001_schedule
+  # 終了コード 4（警告）と失敗を SNS で通知する（true でトピックを作る. 購読は別に付ける）
+  create_notification_topic = var.job0001_notification
 }

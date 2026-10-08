@@ -36,43 +36,41 @@ resource "aws_iam_role_policy" "sfn" {
 }
 
 resource "aws_sfn_state_machine" "this" {
-  name     = var.name
-  role_arn = aws_iam_role.sfn.arn
-  definition = jsonencode({
-    Comment = "JOB を ECS タスクとして実行し、終了を待つ"
-    StartAt = "RunJob"
-    States = {
-      RunJob = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::ecs:runTask.sync"
-        Parameters = {
-          LaunchType     = "FARGATE"
-          Cluster        = var.cluster_arn
-          TaskDefinition = var.task_definition_arn
-          NetworkConfiguration = {
-            AwsvpcConfiguration = {
-              Subnets        = var.subnet_ids
-              SecurityGroups = var.security_group_ids
-              AssignPublicIp = "DISABLED"
-            }
-          }
-          Overrides = {
-            ContainerOverrides = [{
-              Name    = "app"
-              Command = var.command
-            }]
-          }
-        }
-        Retry = [{
-          ErrorEquals     = ["ECS.AmazonECSException"]
-          IntervalSeconds = 30
-          MaxAttempts     = 2
-          BackoffRate     = 2
-        }]
-        End = true
-      }
-    }
-  })
+  name       = var.name
+  role_arn   = aws_iam_role.sfn.arn
+  definition = jsonencode(local.state_machine_definition)
+}
+
+# 失敗・警告の通知（create_notification_topic = true のときだけ）. 購読（メール・Chatbot など）は利用者が付ける
+resource "aws_sns_topic" "notification" {
+  count             = var.create_notification_topic ? 1 : 0
+  name              = local.notification_topic_name
+  kms_master_key_id = "alias/aws/sns" # AWS 管理のキーで暗号化（S3・Aurora と同じく、カスタマー管理キーは使わない）
+}
+
+# AWS 管理のキー（alias/aws/sns）で暗号化したトピックへ発行するには、そのキーの利用権限が要る
+data "aws_kms_alias" "sns" {
+  count = var.create_notification_topic ? 1 : 0
+  name  = "alias/aws/sns"
+}
+
+data "aws_iam_policy_document" "notify" {
+  count = var.create_notification_topic ? 1 : 0
+  statement {
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.notification[0].arn]
+  }
+  statement {
+    actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+    resources = [data.aws_kms_alias.sns[0].target_key_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "notify" {
+  count  = var.create_notification_topic ? 1 : 0
+  name   = "publish-notification"
+  role   = aws_iam_role.sfn.id
+  policy = data.aws_iam_policy_document.notify[0].json
 }
 
 data "aws_iam_policy_document" "scheduler_assume" {
