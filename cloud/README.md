@@ -51,9 +51,22 @@ ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はア�
 | 範囲外 | 今の状態 | 用意するときの例 |
 |---|---|---|
 | **API を外から呼ぶ入口（ALB など）** | API のタスクは private サブネットにあり、セキュリティグループに受信の許可（ingress）がありません。**VPC の外からも、VPC の中の別のリソースからも API には届きません** | ALB（またはアカウント共通の入口）を作り、ターゲットグループに API のサービスを登録し、API のセキュリティグループに ALB からの 8080 を許可する |
-| **コンテナイメージのビルドと ECR への push** | ECR のリポジトリも、イメージをビルドして push するパイプラインもありません。`app_image` には、利用者が別に用意したイメージの URI を指定します | ECR のリポジトリを作り、CI（GitHub Actions など）で `bootJar` → `docker build` → `docker push` し、そのタグを `app_image` に渡す |
+| **コンテナイメージのビルドと ECR への push** | ECR のリポジトリも、イメージをビルドして push するパイプラインもありません。`app_image` には、利用者が別に用意したイメージの URI を指定します | ECR のリポジトリを作り、CI（GitHub Actions など）で `bootJar` → `docker build` → `docker push` し、そのタグを `app_image` に渡す。イメージは **`ENTRYPOINT` を `java -jar` にする**（下の「コンテナイメージの決まり」。例: [sample-app/Dockerfile](../sample-app/Dockerfile)） |
 
 そのため、下の「構築の流れ」の 5・7 は、上の 2 つを用意した場合の手順です。バッチ（JOB0001）は入口が要らないので、イメージがあれば Step Functions から動かせます。
+
+### コンテナイメージの決まり（ENTRYPOINT と Command）
+
+バッチのジョブフロー（`modules/batch-workflow`）は、ECS のコンテナの上書き（`ContainerOverrides` の `Command`）で、
+環境の `main.tf` の `command`（例: `["--app.batch.job=JOB0001", "--input=s3://…"]`）を渡します。
+ECS の `Command` は Docker の `CMD` を置き換えるので、**イメージは次の形にしてください**。
+
+- `ENTRYPOINT ["java", "-jar", "/opt/app/app.jar"]`（exec 形式）にし、`CMD` は書かない。`Command` が Spring Boot の起動引数として後ろに付きます
+- `ENTRYPOINT` を書かずに `CMD ["java", "-jar", …]` にすると、`Command` で起動のコマンドごと置き換わり、`--app.batch.job=JOB0001` を実行しようとしてタスクが起動しません（Step Functions は `JobFailed`）
+- API とバッチは同じイメージで、プロファイル（タスク定義の環境変数 `SPRING_PROFILES_ACTIVE`。API は `cloud`、バッチは `cloud,batch`）で切り替えます
+
+例は [sample-app/Dockerfile](../sample-app/Dockerfile) です（`./gradlew bootJar` の後に `docker build`）。CI の `e2e` ジョブが、このイメージを作り、
+`--app.batch.job=…` を後ろに付けて起動できること（存在しないジョブ ID で終了コード 8・APPE0006）と、起動そのものの失敗も終了コード 8 になることを確かめます。
 
 ## バッチのジョブフロー（終了コードの扱い）
 
@@ -65,7 +78,7 @@ ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はア�
 | 0 | 正常 | 成功（`Succeeded`） | しない |
 | 4 | 警告あり（形式エラーの行を飛ばして取込を続けた） | **成功扱い**（`SucceededWithWarning`） | する（件名に `WARNING`） |
 | 6 | 内容の違う重複あり（登録済みの注文番号で内容が違う行を、取り込まずに飛ばした。人が確かめる） | 失敗（`JobFailed`） | する（件名に `FAILED`） |
-| 8・その他の 0 以外 | 異常終了 | 失敗（`JobFailed`） | する（件名に `FAILED`） |
+| 8・その他の 0 以外 | 異常終了（バッチの起動そのものの失敗も 8） | 失敗（`JobFailed`） | する（件名に `FAILED`） |
 | 取れない | コンテナが起動しなかった・ECS の起動失敗・時間の上限を超えた | 失敗（`JobFailed`） | する |
 
 - 通知は SNS トピックに発行します。トピックは `job0001_notification = true` のときだけ作り（既定は作らない）、ARN を出力 `job0001_notification_topic_arn` に出します。
@@ -180,6 +193,30 @@ Aurora は private サブネットにあり、DB のセキュリティグルー�
 - 実案件では、スキーマの変更は Flyway・Liquibase などのマイグレーションツールで、パイプラインやアプリの起動時に流す形にしてください（このサンプルには入れていません）
 - `simple/` の RDS は、Session Manager で EC2 に入り、EC2 に入っている `psql`（`user_data.sh` が入れる）で同じように流します
 
+### アプリ用の DB ユーザー
+
+既定（`app_db_secret_arn` を指定しないとき）は、API とバッチが **Aurora のマスターユーザー** で接続します。マスターユーザーはテーブルの削除や
+ユーザーの作成もできるので、学習・試作用の割り切りです。**実案件や、共有の環境では、業務データの読み書きだけができるアプリ用のユーザーを作って切り替えてください。**
+Terraform にはユーザーを作る処理を入れていません（DB は private サブネットにあり、Terraform から SQL を流せないため）。手順は次のとおりです。
+
+1. 上の「DB にテーブルを作る」と同じく、CloudShell の VPC 環境からマスターユーザーで `sampledb` に接続する（テーブルを先に作っておく）
+2. [db/create_app_user.sql](db/create_app_user.sql) の中身を貼り付けて実行する。パスワードは `\prompt` で聞かれたときに貼り付ける（長いランダムな文字列。`aws secretsmanager get-random-password` などで作る）。
+   できるのは `SELECT`・`INSERT`（sample-app が使うもの）と、シーケンスの利用だけです。テーブルの作成・削除はできません
+3. 同じユーザー名とパスワードを、JSON の `username`・`password` の形で Secrets Manager に入れる（コンソールの「その他のシークレット」か、次のコマンド。
+   パスワードをコマンドの履歴に残さないよう、ファイルから読む）
+
+   ```bash
+   aws secretsmanager create-secret --name sample-dev1/db-app-user --secret-string file://app-user.json   # {"username":"sample_app","password":"…"}
+   rm app-user.json
+   ```
+
+4. 環境の `terraform.tfvars` に、そのシークレットの ARN を `app_db_secret_arn = "arn:aws:secretsmanager:…"` と書き、`plan` → レビュー → `apply` する。
+   API・バッチのタスク定義の `DB_USER`・`DB_PASSWORD` がアプリ用のユーザーに変わり、タスクの実行ロールが読めるシークレットもそれだけになります
+5. API・バッチを動かして確かめる（権限が足りなければ `permission denied for table …` が出る）
+
+- パスワードを変えるときは、`ALTER ROLE sample_app PASSWORD …` とシークレットの値を両方変え、API のタスクを入れ替えます（シークレットの自動ローテーションはこのサンプルに入れていません）
+- スキーマの変更（テーブルの作成・変更）は、マスターユーザーか、マイグレーション用のユーザーで行います
+
 ## ローカル環境との対応
 
 | 項目 | ローカル | クラウド |
@@ -205,6 +242,38 @@ terraform init
 terraform apply
 # jar を置いて起動（Session Manager で接続後）: /opt/app/app.jar と /opt/app/app.env を置き、sudo systemctl start app
 ```
+
+#### `/opt/app/app.env`（アプリの設定）
+
+`app.service`（`user_data.sh` が作る）は `/opt/app/app.env` を環境変数として読みます。次の値を書きます（`KEY=値` を 1 行ずつ。引用符は付けない）。
+
+| 変数 | 値 | どこから |
+|---|---|---|
+| `SPRING_PROFILES_ACTIVE` | `cloud` | 固定（API として起動する） |
+| `DB_URL` | `jdbc:postgresql://<db_endpoint>:5432/sampledb` | `terraform output -raw db_endpoint` |
+| `DB_USER` | マスターユーザー名（既定 `app_admin`）か、アプリ用のユーザー | シークレットの `username` |
+| `DB_PASSWORD` | パスワード | シークレットの `password`（`terraform output -raw db_master_user_secret_arn` のシークレット） |
+
+EC2 のロールには、RDS が管理するマスターユーザーのシークレットだけを読む権限（`secretsmanager:GetSecretValue`）を付けています。
+Session Manager で入った後、EC2 の上で次のように作ると、パスワードを手で写さずに済みます（AWS CLI は Amazon Linux 2023 に入っています）。
+
+```bash
+SECRET_ARN=<terraform output -raw db_master_user_secret_arn の値>
+DB_ENDPOINT=<terraform output -raw db_endpoint の値>
+secret=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --query SecretString --output text)
+sudo install -o app -g app -m 600 /dev/null /opt/app/app.env
+{
+  echo "SPRING_PROFILES_ACTIVE=cloud"
+  echo "DB_URL=jdbc:postgresql://${DB_ENDPOINT}:5432/sampledb"
+  echo "DB_USER=$(echo "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])')"
+  echo "DB_PASSWORD=$(echo "$secret" | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')"
+} | sudo tee /opt/app/app.env > /dev/null
+unset secret
+sudo systemctl restart app
+```
+
+- `app.env` はパスワードを含むので、所有者 `app`・権限 `600` にします（上の `install`）。RDS がパスワードを自動で変えた（ローテーション）ときは、作り直して `systemctl restart app` します
+- テーブルは上の「DB にテーブルを作る」の最後の項目（EC2 の `psql`）で作ります。アプリ用のユーザーを使うときは「アプリ用の DB ユーザー」の SQL を同じく流し、`DB_USER`・`DB_PASSWORD` をそのユーザーにします（そのシークレットを読む権限は EC2 のロールに足してください）
 
 ## 費用の目安について
 

@@ -3,3 +3,4 @@ app_image   = "<account-id>.dkr.ecr.ap-northeast-1.amazonaws.com/sample-app:<tag
 bucket_name = "<your-unique-bucket-name>-prod"
 # job0001_schedule = "cron(0 2 * * ? *)"   # 毎日 2:00（日本時間）
 # job0001_notification = true              # 警告（終了コード 4）と失敗を SNS で通知する（トピックの購読は別に付ける）
+# app_db_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:<account-id>:secret:<name>"   # アプリ用の DB ユーザー（cloud/README.md）。無ければマスターユーザーで接続する

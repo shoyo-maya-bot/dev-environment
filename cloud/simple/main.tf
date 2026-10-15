@@ -71,6 +71,21 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# アプリ（/opt/app/app.env を作る手順）が DB のパスワードを読むための権限. RDS が管理するマスターユーザーのシークレットだけを読める.
+# app.env の作り方は cloud/README.md の「簡易環境（simple/）」
+data "aws_iam_policy_document" "read_db_secret" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [aws_db_instance.db.master_user_secret[0].secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "read_db_secret" {
+  name   = "read-db-secret"
+  role   = aws_iam_role.web.id
+  policy = data.aws_iam_policy_document.read_db_secret.json
+}
+
 resource "aws_iam_instance_profile" "web" {
   name = "${var.system_name}-web"
   role = aws_iam_role.web.name
