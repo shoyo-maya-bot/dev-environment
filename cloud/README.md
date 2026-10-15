@@ -53,7 +53,7 @@ ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はア�
 | **API を外から呼ぶ入口（ALB など）** | API のタスクは private サブネットにあり、セキュリティグループに受信の許可（ingress）がありません。**VPC の外からも、VPC の中の別のリソースからも API には届きません** | ALB（またはアカウント共通の入口）を作り、ターゲットグループに API のサービスを登録し、API のセキュリティグループに ALB からの 8080 を許可する |
 | **コンテナイメージのビルドと ECR への push** | ECR のリポジトリも、イメージをビルドして push するパイプラインもありません。`app_image` には、利用者が別に用意したイメージの URI を指定します | ECR のリポジトリを作り、CI（GitHub Actions など）で `bootJar` → `docker build` → `docker push` し、そのタグを `app_image` に渡す |
 
-そのため、下の「構築の流れ」の 5・6 は、上の 2 つを用意した場合の手順です。バッチ（JOB0001）は入口が要らないので、イメージがあれば Step Functions から動かせます。
+そのため、下の「構築の流れ」の 5・7 は、上の 2 つを用意した場合の手順です。バッチ（JOB0001）は入口が要らないので、イメージがあれば Step Functions から動かせます。
 
 ## バッチのジョブフロー（終了コードの扱い）
 
@@ -64,6 +64,7 @@ ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はア�
 |---|---|---|---|
 | 0 | 正常 | 成功（`Succeeded`） | しない |
 | 4 | 警告あり（形式エラーの行を飛ばして取込を続けた） | **成功扱い**（`SucceededWithWarning`） | する（件名に `WARNING`） |
+| 6 | 内容の違う重複あり（登録済みの注文番号で内容が違う行を、取り込まずに飛ばした。人が確かめる） | 失敗（`JobFailed`） | する（件名に `FAILED`） |
 | 8・その他の 0 以外 | 異常終了 | 失敗（`JobFailed`） | する（件名に `FAILED`） |
 | 取れない | コンテナが起動しなかった・ECS の起動失敗・時間の上限を超えた | 失敗（`JobFailed`） | する |
 
@@ -71,9 +72,24 @@ ALB・WAF・ドメイン・監査系（CloudTrail / GuardDuty / Config）はア�
   **購読（メール・Chatbot など）はトピックに別に付けてください**（メールアドレスをコードに書かないため）
 - 通知に失敗しても、ジョブの結果（成功・失敗）は変えません
 - 時間の上限: ジョブ 1 回の実行は `job_timeout_seconds`（モジュールの変数。既定 3600 秒）まで。超えたら ECS タスクを止めて失敗にし、失敗の通知を出します。
-  ジョブフロー全体にも上限（`TimeoutSeconds`。ジョブの上限 + 起動の再試行・通知の分 + 余裕）を付けています。長いジョブは環境の `main.tf` で `job_timeout_seconds` を渡します
+  ジョブフロー全体にも上限（`TimeoutSeconds`。ジョブの上限 + 通知の分 + 余裕）を付けています。長いジョブは環境の `main.tf` で `job_timeout_seconds` を渡します
 - 警告で止めたい（4 も失敗にしたい）など運用の決まりが違うときは、`state_machine.tf` の `CheckExitCode` を直します
 - CI は、定義を `terraform console` で取り出し、終了コードごとの行き先をテストで確かめます（[.github/scripts/test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)。AWS にはつながない）
+
+### 再試行と多重実行
+
+- **ジョブ（`RunJob`）は自動で再試行しません。** `ecs:runTask.sync` のエラー（`ECS.AmazonECSException` など）は、タスクの起動前の失敗か、
+  起動した後（終了を待つ間）の失敗かをエラー名で区別できません。起動後の失敗で再試行すると、同じジョブの ECS タスクが 2 つ動きます（二重起動）。
+  失敗は通知（`JobFailed`）で人に知らせ、CloudWatch Logs と実行の入出力で原因を確かめてから、Step Functions の実行を開始し直します
+- **多重実行は Step Functions では防いでいません（このサンプルの制約）。** 次のときは、同じジョブが同時に 2 つ動きえます
+  - スケジュールの間隔が、ジョブにかかる時間（最長はジョブフロー全体の `TimeoutSeconds`）より短い
+  - 定刻の実行中に、手で実行を開始した
+  - EventBridge Scheduler の配信は「少なくとも 1 回」で、まれに同じ定刻の起動が重なることがある
+- そのため、ジョブ自体を **何回・同時に動いても結果が変わらない** 作りにしています。JOB0001 は注文番号の一意制約と `ON CONFLICT DO NOTHING` で
+  二重登録にならず、同じ内容の重複は `duplicated` として飛ばします（内容の違う重複は終了コード 6）。
+  スケジュールの間隔はジョブフロー全体の `TimeoutSeconds` より長くしてください（既定の `job_timeout_seconds = 3600` なら 1 時間 + 約 11 分）
+- 冪等にできないジョブを足すときは、同時に 1 つだけ動くようにする仕組みが別に要ります（例: ジョブの最初に DynamoDB の条件付き書き込みでロックを取る、
+  Step Functions の `ListExecutions` で実行中の数を確かめて 2 つ目は止める）。このサンプルには入れていません
 
 ## ディレクトリ
 
@@ -131,9 +147,38 @@ Step Functions と EventBridge Scheduler は AWS 側から ECS を呼ぶので�
 3. 差分を確認してレビューを受ける: `terraform plan -out=plan.out`
 4. 承認後に反映: `terraform apply plan.out`（本番はパイプライン経由のみ）
 5. アプリのイメージを更新したら、`app_image` を新しいタグにして 3〜4 を繰り返す（イメージのビルドと ECR への push は、このサンプルの範囲外。上の「このサンプルの範囲外」）
-6. 疎通確認:
+6. テーブルを作る（初回だけ。下の「DB にテーブルを作る」）。ローカルの `local/db/init/*.sql` は docker の初回起動のときにしか流れないので、
+   Aurora には **テーブルがありません**。作らずに疎通確認をすると、API は 500、バッチは終了コード 8（`relation "orders" does not exist`）になります
+7. 疎通確認（6 が済んでいることが前提）:
    - バッチ: Step Functions の実行（`job0001_state_machine_arn`）を開始し、結果（`Succeeded` / `SucceededWithWarning` / `JobFailed`）と CloudWatch Logs を見る（上の「バッチのジョブフロー」）
    - API: このサンプルには外からの入口（ALB など）が無いので、そのままでは呼べません。入口を用意したら、Karate を `-Dkarate.env=dev -DbaseUrl=<入口の URL>` で実行します
+
+### DB にテーブルを作る（スキーマの適用）
+
+Aurora は private サブネットにあり、DB のセキュリティグループは API とバッチのタスクからの 5432 だけを許可しています。
+新しいリソース（踏み台の EC2 など）を作らずに、**AWS CloudShell の VPC 環境**（CloudShell は追加料金なし）から `psql` で
+[local/db/init/01_schema.sql](../local/db/init/01_schema.sql) を流します。Terraform は使いません（`plan` / `apply` もしません）。
+
+1. 値を確かめる（`terraform output` は state を読むだけで、AWS の設定は変えません）
+   - DB のエンドポイント: `terraform output -raw db_endpoint`
+   - マスターユーザーのパスワード: RDS のコンソールでクラスターを開き、「設定」の「マスター認証情報の ARN」の Secrets Manager のシークレット（`username`・`password`）
+   - バッチのタスクのセキュリティグループ（DB への 5432 が許可されているもの）: ECS のコンソールでバッチのタスク定義・サービスの設定から確かめる
+2. CloudShell を開き、「アクション」→「VPC 環境を作成」で、VPC = この環境の VPC、サブネット = private サブネットの 1 つ、
+   セキュリティグループ = 1 のバッチのセキュリティグループ を選ぶ
+3. `psql --version` で psql があることを確かめ、接続する（パスワードは聞かれたら貼り付ける。コマンドの履歴に残さない）
+
+   ```bash
+   psql "host=<db_endpoint> port=5432 dbname=sampledb user=<username> sslmode=require"
+   ```
+
+4. `01_schema.sql` の中身を貼り付けて実行し、`\dt` で `member` と `orders` があることを確かめる。
+   疎通確認で JOB0001 を動かすなら、取込先の会員が要るので `02_data.sql`（架空の会員 2 件）も流す（入れないと、すべての行が「会員が存在しません」で終了コード 4）
+5. 終わったら CloudShell の VPC 環境を削除する
+
+- VPC 環境では CloudShell へのファイルのアップロードができないので、SQL は貼り付けます（数行なので貼り付けで足ります）
+- 流し直すと `CREATE TABLE` が「既にある」で失敗します（テーブルはそのまま）。作り直すときは、データが消えてよいことを確かめてから `DROP TABLE orders, member;`
+- 実案件では、スキーマの変更は Flyway・Liquibase などのマイグレーションツールで、パイプラインやアプリの起動時に流す形にしてください（このサンプルには入れていません）
+- `simple/` の RDS は、Session Manager で EC2 に入り、EC2 に入っている `psql`（`user_data.sh` が入れる）で同じように流します
 
 ## ローカル環境との対応
 

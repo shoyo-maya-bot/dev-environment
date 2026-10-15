@@ -7,6 +7,10 @@ ecs:runTask.sync は 0 以外の終了を States.TaskFailed にするので、�
 後退: RunJob にも状態機械全体にも時間の上限（TimeoutSeconds）が無く、タスクが止まらないと実行が最長 1 年残り、
 失敗の通知も出なかった. RunJob の上限（job_timeout_seconds）を超えたら失敗の経路（通知 → JobFailed）へ進むこと.
 
+後退: RunJob（ecs:runTask.sync）を ECS.AmazonECSException で再試行していた. このエラーはタスクの起動前の失敗か、
+起動した後（終了を待つ間）の失敗かをエラー名で区別できず、起動後の失敗で再試行すると同じジョブのタスクが 2 つ動く（二重起動）.
+RunJob は再試行せず、失敗の経路（通知 → JobFailed）へ進むこと.
+
 定義は terraform console で取り出した JSON（.github/scripts/dump_batch_workflow.sh. AWS にはつながない）を読み、
 使っている範囲の States Language を小さく実行して、終了コードごとの行き先を確かめる.
 BATCH_WORKFLOW_DEFINITIONS（JSON の置き場所）が無いとき（terraform の無い versions・windows ジョブ）は飛ばす.
@@ -245,6 +249,19 @@ class BatchWorkflowTest(unittest.TestCase):
                     self.assertIn("States.Timeout", published[0]["Message"])
                 else:
                     self.assertEqual(published, [])
+
+    def test_run_job_is_not_retried(self):
+        """ECS のエラーで RunJob をやり直さない（起動後の失敗でのやり直しは二重起動になる）."""
+        for notify in (False, True):
+            with self.subTest(notify=notify):
+                d = self.load(notify)
+                run_job = d["States"]["RunJob"]
+                self.assertEqual(run_job.get("Retry", []), [], "RunJob に Retry があります（二重起動のおそれ）")
+                # 起動後の失敗に当たるエラーは、そのまま失敗の経路へ（RunJob を 1 回だけ通る）
+                for err in ("ECS.AmazonECSException", "States.TaskFailed", "States.Timeout"):
+                    end, path, _ = run(d, ("error", err, None))
+                    self.assertEqual(end, "JobFailed", path)
+                    self.assertEqual(path.count("RunJob"), 1, path)
 
     def test_timeout_variable(self):
         p = Path(DEFS or "") / "definition-timeout-120.json"
