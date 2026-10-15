@@ -35,7 +35,7 @@ Java（Spring Boot + MyBatis）開発の **ローカル開発環境** と **ク�
 | パッケージ | `com.example.<アプリ名>` | `com.example.sample` |
 | API ID / ジョブ ID | `API` + 4 桁 / `JOB` + 4 桁 | `API0001`、`JOB0001` |
 | メッセージ ID | `APP` + 種別（I 情報 / W 警告 / E エラー）+ 4 桁 | `APPE0002` |
-| バッチの終了コード | 0 正常 / 4 警告あり / 6 要確認（JOB0001 の内容の違う重複）/ 8 異常 | — |
+| バッチの終了コード | 0 正常 / 4 警告あり / 6 要確認（JOB0001 の内容の違う重複）/ 8 異常（DB の設定誤りなどで起動そのものに失敗したときも 8） | — |
 
 実案件では、社内のパッケージ名・ID 体系・共通ライブラリに置き換えます。
 
@@ -64,6 +64,7 @@ e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
 - Karate の API テスト（`./gradlew karateTest`）が通る
 - 取込バッチ JOB0001 が終了コード 4 で終わり、2 回目は二重に取り込まない。登録済みの注文番号で内容の違う行は終了コード 6（APPW0002）。存在しないジョブ ID は終了コード 8（APPE0006）
 - DB を止めると API が 503（APPE0008）を返し、DB を戻すと再起動なしで 200 に戻る
+- [sample-app/Dockerfile](sample-app/Dockerfile)（ECS 用のイメージの例）を作り、ECS の Command と同じく `--app.batch.job=…` を後ろに付けて起動できる（存在しないジョブ ID で終了コード 8）。バッチの起動そのものの失敗も終了コード 8
 
 [exercise-base.yml](.github/workflows/exercise-base.yml)
 

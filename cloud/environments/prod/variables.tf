@@ -35,3 +35,14 @@ variable "job0001_schedule" {
   type        = string
   default     = null
 }
+
+variable "app_db_secret_arn" {
+  description = "API・バッチが DB に接続するアプリ用ユーザーの Secrets Manager のシークレットの ARN（JSON の username・password を持つもの）。null なら Aurora のマスターユーザーで接続する（学習・試作用。cloud/README.md の「アプリ用の DB ユーザー」）"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.app_db_secret_arn == null || can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.app_db_secret_arn))
+    error_message = "app_db_secret_arn は Secrets Manager のシークレットの ARN（arn:aws:secretsmanager:<region>:<account>:secret:<name>）で指定してください。"
+  }
+}

@@ -9,6 +9,12 @@ locals {
   enable_vpc_endpoints = true
 }
 
+# API・バッチが DB に接続する資格情報のシークレット. app_db_secret_arn を指定すれば、そのアプリ用ユーザー（権限を絞ったもの）を使う.
+# 指定しなければ、これまでどおり Aurora のマスターユーザー（学習・試作用. 実案件では使わない。cloud/README.md の「アプリ用の DB ユーザー」）
+locals {
+  db_app_secret_arn = coalesce(var.app_db_secret_arn, module.db.master_user_secret_arn)
+}
+
 module "network" {
   source               = "../../modules/network"
   name                 = local.name
@@ -63,10 +69,10 @@ module "api" {
     DB_URL                 = "jdbc:postgresql://${module.db.endpoint}:5432/sampledb"
   }
   secrets = {
-    DB_PASSWORD = "${module.db.master_user_secret_arn}:password::"
-    DB_USER     = "${module.db.master_user_secret_arn}:username::"
+    DB_PASSWORD = "${local.db_app_secret_arn}:password::"
+    DB_USER     = "${local.db_app_secret_arn}:username::"
   }
-  secret_arns = [module.db.master_user_secret_arn]
+  secret_arns = [local.db_app_secret_arn]
 }
 
 module "batch" {
@@ -84,10 +90,10 @@ module "batch" {
     DB_URL                 = "jdbc:postgresql://${module.db.endpoint}:5432/sampledb"
   }
   secrets = {
-    DB_PASSWORD = "${module.db.master_user_secret_arn}:password::"
-    DB_USER     = "${module.db.master_user_secret_arn}:username::"
+    DB_PASSWORD = "${local.db_app_secret_arn}:password::"
+    DB_USER     = "${local.db_app_secret_arn}:username::"
   }
-  secret_arns = [module.db.master_user_secret_arn]
+  secret_arns = [local.db_app_secret_arn]
 }
 
 module "db" {

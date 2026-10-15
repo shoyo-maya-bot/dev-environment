@@ -284,6 +284,22 @@ jobs:
         run: .github/scripts/e2e.sh karate-check sample-app/build/test-results/karateTest
       - name: Batch JOB0001 (exit codes)
         run: .github/scripts/e2e.sh batch "$JAR" main
+      # sample-app/Dockerfile の例: ENTRYPOINT が java -jar で、ECS の Command（batch-workflow の command）が起動引数として後ろに付くこと.
+      # 存在しないジョブ ID は APPE0006 で 8、起動そのものの失敗も 8（README の終了コード）. DB にはつながない
+      - name: Container image example (ENTRYPOINT + Command, exit codes)
+        working-directory: sample-app
+        run: |
+          docker build -t sample-app:ci .
+          set +e
+          docker run --rm -e SPRING_PROFILES_ACTIVE=cloud,batch sample-app:ci --app.batch.job=JOB9999 > "$RUNNER_TEMP/e2e-logs/image-unknown-job.log" 2>&1
+          code=$?
+          docker run --rm -e SPRING_PROFILES_ACTIVE=cloud,batch sample-app:ci --spring.main.web-application-type=bogus > "$RUNNER_TEMP/e2e-logs/image-startup-failure.log" 2>&1
+          code2=$?
+          set -e
+          echo "unknown job: exit=$code / startup failure: exit=$code2"
+          test "$code" -eq 8
+          grep -q APPE0006 "$RUNNER_TEMP/e2e-logs/image-unknown-job.log"
+          test "$code2" -eq 8
       - name: DB down returns 503 (APPE0008)
         run: .github/scripts/e2e.sh db-down local
       - name: Show logs on failure
