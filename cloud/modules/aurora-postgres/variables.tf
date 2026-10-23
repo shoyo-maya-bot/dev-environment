@@ -49,6 +49,13 @@ variable "backup_retention_days" {
 }
 
 variable "deletion_protection" {
-  type    = bool
-  default = true
+  description = "クラスターの削除保護（true の間は destroy できない）。最終スナップショットは skip_final_snapshot で別に決める"
+  type        = bool
+  default     = true
+}
+
+variable "skip_final_snapshot" {
+  description = "削除（destroy）のときに最終スナップショット（<name>-final）を取らない。既定は false（取る）。消えてよい学習・試作用の環境だけ true にする"
+  type        = bool
+  default     = false
 }

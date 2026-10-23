@@ -9,7 +9,7 @@
 > [!WARNING]
 > **本番用ではありません・apply すると費用がかかります**
 >
-> - この構成は **学習と試作のための雛形で、本番用ではありません**。CI では `terraform fmt`・`validate`・tflint・trivy config までしか確かめておらず、
+> - この構成は **学習と試作のための雛形で、本番用ではありません**。CI では `terraform fmt`・`validate`・tflint・trivy config と、`terraform console` で評価する定義・入力検査のテストまでしか確かめておらず、
 >   実際の AWS アカウントへの `plan` / `apply` は試していません。ALB・WAF・監視・バックアップ設計なども含みません
 > - **API を外から呼ぶ入口（ALB など）と、イメージのビルド・ECR への push は作りません**（下の「このサンプルの範囲外」）
 > - `terraform apply` すると、作ったものが **起動しているだけで月額の費用がかかります**（下の「費用の目安について」）。使い終わったら `terraform destroy` してください
@@ -116,14 +116,27 @@ cloud/
 └── simple/               # 1 台で手早く試す小さな環境（EC2 + RDS + Nginx）
 ```
 
-環境の違いは各環境の `main.tf` 冒頭の `locals`（NAT の有無・DB 台数・データ保護・API の台数・VPC エンドポイントの有無）と `terraform.tfvars` だけにし、
+環境の違いは各環境の `main.tf` 冒頭の `locals`（NAT の有無・DB 台数・データ保護・DB の最終スナップショット・API の台数・VPC エンドポイントの有無）と `terraform.tfvars` だけにし、
 構造は全環境で同じにします。
 
-| 環境 | NAT | VPC エンドポイント | DB 台数 | 削除保護 | API 台数 |
-|---|---|---|---|---|---|
-| dev1 | なし（費用削減） | あり（NAT の代わり） | 1 | なし | 1 |
-| stg | あり | なし | 1 | あり | 1 |
-| prod | あり | なし | 2 | あり | 2 |
+| 環境 | NAT | VPC エンドポイント | DB 台数 | 削除保護 | 最終スナップショット | API 台数 |
+|---|---|---|---|---|---|---|
+| dev1 | なし（費用削減） | あり（NAT の代わり） | 1 | なし | 取らない | 1 |
+| stg | あり | なし | 1 | あり | 取る | 1 |
+| prod | あり | なし | 2 | あり | 取る | 2 |
+
+この表は各環境の `locals`（`enable_nat_gateway`・`enable_vpc_endpoints`・`db_instance_count`・`protect_data`・`skip_db_final_snapshot`・`api_desired_count`）と
+一致することを CI（`versions` ジョブの [test_docs_consistency.py](../.github/scripts/test_docs_consistency.py)）で確かめています。
+
+### DB の削除保護と最終スナップショット
+
+- **削除保護**（`protect_data` → モジュールの `deletion_protection`）: `true` の間は Aurora のクラスターを `destroy` できません。S3 バケットの `force_destroy` も `protect_data` で決まります（保護ありなら中身のあるバケットは消せない）
+- **最終スナップショット**（`skip_db_final_snapshot` → モジュールの `skip_final_snapshot`）: 削除保護とは **別に** 決めます。`false`（モジュールの既定）なら、
+  クラスターを消すときに `<name>-final` のスナップショットを取ります。stg・prod は `false` です
+- stg・prod を消すときは、削除保護を外して `apply` してから `destroy` します。このときも最終スナップショットは取られます
+  （以前は削除保護と連動していたため、削除保護を外した時点でスナップショットも取られなくなっていました）
+- 同じ名前のスナップショットが残っていると、次の `destroy` は失敗します。作り直しを繰り返すときは、古い `<name>-final` を確かめてから消すか名前を変えてください
+- dev1 は学習・試作用で、消してよい前提なので `true`（取らない）です。dev1 のデータを残したいときは `skip_db_final_snapshot = false` にしてから `destroy` します
 
 ### dev1 の VPC エンドポイント
 
@@ -234,6 +247,7 @@ Terraform にはユーザーを作る処理を入れていません（DB は pri
 
 試作や短期の検証で、1 台の EC2 にアプリを置いて手早く動かしたいときに使います（Amazon Linux 2023・Corretto 21・Nginx・RDS PostgreSQL）。
 EC2 へは SSH ではなく Session Manager で入ります。使い終わったら `terraform destroy` で消してください。
+RDS は削除保護なし・最終スナップショットなし（`skip_final_snapshot = true`）なので、**`destroy` で DB のデータも消えます**（残したいデータは先に `pg_dump` などで取り出す）。
 
 ```bash
 cd simple
@@ -303,7 +317,7 @@ SQS を使わないなら `interface_endpoint_services` から外すと、月 �
 | `terraform init -backend=false -lockfile=readonly` → `terraform validate` | 構文と参照（`.terraform.lock.hcl` どおりの provider で） |
 | tflint | 書き方の誤り・非推奨の書き方 |
 | trivy config | IaC のセキュリティ検査（HIGH 以上）。受け入れた指摘は [.trivyignore](.trivyignore) に理由付きで書く |
-| batch-workflow の定義 | `terraform console` で状態機械の定義を取り出し、終了コード 0・4・8 などの行き先、時間の上限（時間切れは失敗）と通知の有無をテストする（[dump_batch_workflow.sh](../.github/scripts/dump_batch_workflow.sh)・[test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)） |
+| batch-workflow の定義 | `terraform console` で状態機械の定義を取り出し、終了コード 0・4・6・8 などの行き先、時間の上限（時間切れは失敗）と通知の有無をテストする（[dump_batch_workflow.sh](../.github/scripts/dump_batch_workflow.sh)・[test_batch_workflow.py](../.github/scripts/test_batch_workflow.py)） |
 | cloud/simple の入力検査 | `allowed_http_cidrs` に `0.0.0.0/0`・`::/0`・CIDR でない値を渡すと誤りになることを `terraform console` で確かめる（[test_simple_variables.py](../.github/scripts/test_simple_variables.py)） |
 
 ### `.terraform.lock.hcl` を作り直すとき

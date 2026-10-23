@@ -20,19 +20,21 @@ resource "aws_vpc_security_group_ingress_rule" "from_app" {
 }
 
 resource "aws_rds_cluster" "this" {
-  cluster_identifier              = var.name
-  engine                          = "aurora-postgresql"
-  engine_version                  = var.engine_version
-  database_name                   = var.database_name
-  master_username                 = var.master_username
-  manage_master_user_password     = true
-  db_subnet_group_name            = aws_db_subnet_group.this.name
-  vpc_security_group_ids          = [aws_security_group.this.id]
-  storage_encrypted               = true
-  backup_retention_period         = var.backup_retention_days
-  deletion_protection             = var.deletion_protection
-  skip_final_snapshot             = !var.deletion_protection
-  final_snapshot_identifier       = var.deletion_protection ? "${var.name}-final" : null
+  cluster_identifier          = var.name
+  engine                      = "aurora-postgresql"
+  engine_version              = var.engine_version
+  database_name               = var.database_name
+  master_username             = var.master_username
+  manage_master_user_password = true
+  db_subnet_group_name        = aws_db_subnet_group.this.name
+  vpc_security_group_ids      = [aws_security_group.this.id]
+  storage_encrypted           = true
+  backup_retention_period     = var.backup_retention_days
+  deletion_protection         = var.deletion_protection
+  # 最終スナップショットは削除保護とは別に決める（既定は取る）。削除保護と連動させると、destroy の前に削除保護を外した時点で
+  # スナップショットも取られなくなり、データが残らない
+  skip_final_snapshot             = var.skip_final_snapshot
+  final_snapshot_identifier       = var.skip_final_snapshot ? null : "${var.name}-final"
   enabled_cloudwatch_logs_exports = ["postgresql"]
 }
 

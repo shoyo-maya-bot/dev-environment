@@ -1,12 +1,13 @@
 # 環境 dev1 の構成。環境ごとの違いは locals の値だけにする（構造は全環境で同じ）
 # dev1 は学習・試作用で、本番用ではない。NAT を置かない代わりに VPC エンドポイントで ECR・S3・Secrets Manager などに届かせる（費用は cloud/README.md）
 locals {
-  name                 = "${var.system_name}-dev1"
-  enable_nat_gateway   = false
-  db_instance_count    = 1
-  protect_data         = false
-  api_desired_count    = 1
-  enable_vpc_endpoints = true
+  name                   = "${var.system_name}-dev1"
+  enable_nat_gateway     = false
+  db_instance_count      = 1
+  protect_data           = false
+  skip_db_final_snapshot = true
+  api_desired_count      = 1
+  enable_vpc_endpoints   = true
 }
 
 # API・バッチが DB に接続する資格情報のシークレット. app_db_secret_arn を指定すれば、そのアプリ用ユーザー（権限を絞ったもの）を使う.
@@ -104,6 +105,7 @@ module "db" {
   allowed_security_group_ids = [module.api.security_group_id, module.batch.security_group_id]
   instance_count             = local.db_instance_count
   deletion_protection        = local.protect_data
+  skip_final_snapshot        = local.skip_db_final_snapshot
 }
 
 module "job0001" {
