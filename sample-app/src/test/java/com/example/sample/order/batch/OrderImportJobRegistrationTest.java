@@ -2,11 +2,16 @@ package com.example.sample.order.batch;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.sample.batch.BatchJob;
+import com.example.sample.batch.BatchJobGuard;
 import com.example.sample.order.FakeOrderMapper;
 import com.example.sample.order.OrderImportService;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.env.MapPropertySource;
 
 /**
  * JOB0001 をどの起動のときに登録するか.
@@ -39,5 +44,30 @@ class OrderImportJobRegistrationTest {
     void notRegisteredForOtherJobId() {
         runner.withPropertyValues("app.batch.job=JOB9999", "spring.profiles.active=batch")
                 .run(ctx -> assertThat(ctx).doesNotHaveBean(OrderImportJob.class));
+    }
+
+    /**
+     * ジョブが登録される（＝取込が動く）ことと、{@link BatchJobGuard} が正常（0）と判断することが、どの値でも一致する.
+     *
+     * <p>後退: ジョブの登録（{@code @ConditionalOnProperty}. 大文字小文字を区別しない）と BatchJobGuard（equals、前後の空白を除く）で
+     * 比べ方が違い、{@code job0001} は取込の後に 8、{@code " JOB0001"} は何も動かずに 0 になっていた。
+     * 値は起動引数のとおりに渡す（withPropertyValues は前後の空白を取り除くので使わない）。
+     */
+    @Test
+    void guardAgreesWithJobRegistration() {
+        ApplicationContextRunner withGuard = runner.withUserConfiguration(BatchJobGuard.class);
+        for (String value : new String[] {"JOB0001", "job0001", "Job0001", " JOB0001", "JOB0001 ", "JOB9999", "JOB00011", ""}) {
+            withGuard.withInitializer(ctx -> ctx.getEnvironment().getPropertySources().addFirst(
+                            new MapPropertySource("args", Map.of("app.batch.job", value, "spring.profiles.active", "batch"))))
+                    .run(ctx -> {
+                        assertThat(ctx).hasNotFailed();
+                        BatchJobGuard guard = ctx.getBean(BatchJobGuard.class);
+                        guard.run(new DefaultApplicationArguments());
+                        boolean registered = ctx.getBeansOfType(OrderImportJob.class).size() == 1;
+                        assertThat(guard.getExitCode() == BatchJob.OK)
+                                .as("app.batch.job=[%s] 登録=%s 終了コード=%d", value, registered, guard.getExitCode())
+                                .isEqualTo(registered);
+                    });
+        }
     }
 }
