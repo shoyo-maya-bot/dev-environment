@@ -1,11 +1,12 @@
 # 環境 prod の構成。環境ごとの違いは locals の値だけにする（構造は全環境で同じ）
 locals {
-  name                 = "${var.system_name}-prod"
-  enable_nat_gateway   = true
-  db_instance_count    = 2
-  protect_data         = true
-  api_desired_count    = 2
-  enable_vpc_endpoints = false
+  name                   = "${var.system_name}-prod"
+  enable_nat_gateway     = true
+  db_instance_count      = 2
+  protect_data           = true
+  skip_db_final_snapshot = false
+  api_desired_count      = 2
+  enable_vpc_endpoints   = false
 }
 
 # API・バッチが DB に接続する資格情報のシークレット. app_db_secret_arn を指定すれば、そのアプリ用ユーザー（権限を絞ったもの）を使う.
@@ -103,6 +104,7 @@ module "db" {
   allowed_security_group_ids = [module.api.security_group_id, module.batch.security_group_id]
   instance_count             = local.db_instance_count
   deletion_protection        = local.protect_data
+  skip_final_snapshot        = local.skip_db_final_snapshot
 }
 
 module "job0001" {

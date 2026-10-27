@@ -181,6 +181,8 @@ class BatchWorkflowTest(unittest.TestCase):
             "exit 0（念のため失敗でも）": (failed(0), "Succeeded"),
             "exit 4 → 警告で成功扱い": (failed(4), "SucceededWithWarning"),
             "exit 4（結果で返る）": (("ok", task(4)), "SucceededWithWarning"),
+            "exit 6（内容の違う重複. cloud/README では失敗）": (failed(6), "JobFailed"),
+            "exit 6（結果で返っても）": (("ok", task(6)), "JobFailed"),
             "exit 8 → 失敗": (failed(8), "JobFailed"),
             "exit 8（結果で返っても）": (("ok", task(8)), "JobFailed"),
             "exit 1 → 失敗": (failed(1), "JobFailed"),
@@ -203,6 +205,7 @@ class BatchWorkflowTest(unittest.TestCase):
         for ecs, want, subject in (
             (("ok", task(0)), "Succeeded", None),
             (failed(4), "SucceededWithWarning", "WARNING"),
+            (failed(6), "JobFailed", "FAILED"),
             (failed(8), "JobFailed", "FAILED"),
             (("error", "ECS.AmazonECSException", "x"), "JobFailed", "FAILED"),
         ):
