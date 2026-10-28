@@ -17,9 +17,15 @@ variable "allowed_security_group_ids" {
 }
 
 variable "engine_version" {
-  description = "Aurora PostgreSQL の版（ローカルの PostgreSQL 16 とメジャー版をそろえる）"
+  description = "Aurora PostgreSQL の版（ローカルの PostgreSQL 16 とメジャー版をそろえる）. マイナー版が自動で上がったら、ここも実際の版に上げる（cloud/README.md の「DB の版」）"
   type        = string
   default     = "16.6"
+}
+
+variable "auto_minor_version_upgrade" {
+  description = "メンテナンスウィンドウでマイナー版を自動で上げるか（DB インスタンスの設定. 既定 true は AWS の既定と同じ）"
+  type        = bool
+  default     = true
 }
 
 variable "database_name" {

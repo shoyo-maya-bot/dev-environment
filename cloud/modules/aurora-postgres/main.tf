@@ -46,4 +46,6 @@ resource "aws_rds_cluster_instance" "this" {
   engine              = aws_rds_cluster.this.engine
   engine_version      = aws_rds_cluster.this.engine_version
   publicly_accessible = false
+  # 既定（true）は AWS の既定と同じ. メンテナンスウィンドウでマイナー版が自動で上がる（cloud/README.md の「DB の版」）
+  auto_minor_version_upgrade = var.auto_minor_version_upgrade
 }

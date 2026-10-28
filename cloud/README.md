@@ -64,6 +64,8 @@ ECS の `Command` は Docker の `CMD` を置き換えるので、**イメージ
 - `ENTRYPOINT ["java", "-jar", "/opt/app/app.jar"]`（exec 形式）にし、`CMD` は書かない。`Command` が Spring Boot の起動引数として後ろに付きます
 - `ENTRYPOINT` を書かずに `CMD ["java", "-jar", …]` にすると、`Command` で起動のコマンドごと置き換わり、`--app.batch.job=JOB0001` を実行しようとしてタスクが起動しません（Step Functions は `JobFailed`）
 - API とバッチは同じイメージで、プロファイル（タスク定義の環境変数 `SPRING_PROFILES_ACTIVE`。API は `cloud`、バッチは `cloud,batch`）で切り替えます
+- S3 のリージョンは、各環境の `main.tf` がタスク定義の環境変数 `APP_S3_REGION` に `var.region`（`terraform.tfvars` の `region`）を渡します。
+  アプリ（`S3Config`）は `app.s3.region`（= `APP_S3_REGION`）→ 環境変数 `AWS_REGION` → `ap-northeast-1` の順に使います
 
 例は [sample-app/Dockerfile](../sample-app/Dockerfile) です（`./gradlew bootJar` の後に `docker build`）。CI の `e2e` ジョブが、このイメージを作り、
 `--app.batch.job=…` を後ろに付けて起動できること（存在しないジョブ ID で終了コード 8・APPE0006）と、起動そのものの失敗も終了コード 8 になることを確かめます。
@@ -76,7 +78,7 @@ ECS の `Command` は Docker の `CMD` を置き換えるので、**イメージ
 | 終了コード | 意味（sample-app） | Step Functions の結果 | 通知（`job0001_notification = true` のとき） |
 |---|---|---|---|
 | 0 | 正常 | 成功（`Succeeded`） | しない |
-| 4 | 警告あり（形式エラーの行を飛ばして取込を続けた） | **成功扱い**（`SucceededWithWarning`） | する（件名に `WARNING`） |
+| 4 | 警告あり（形式エラーの行・会員が存在しない行を飛ばして取込を続けた） | **成功扱い**（`SucceededWithWarning`） | する（件名に `WARNING`） |
 | 6 | 内容の違う重複あり（登録済みの注文番号で内容が違う行を、取り込まずに飛ばした。人が確かめる） | 失敗（`JobFailed`） | する（件名に `FAILED`） |
 | 8・その他の 0 以外 | 異常終了（バッチの起動そのものの失敗も 8） | 失敗（`JobFailed`） | する（件名に `FAILED`） |
 | 取れない | コンテナが起動しなかった・ECS の起動失敗・時間の上限を超えた | 失敗（`JobFailed`） | する |
@@ -137,6 +139,16 @@ cloud/
   （以前は削除保護と連動していたため、削除保護を外した時点でスナップショットも取られなくなっていました）
 - 同じ名前のスナップショットが残っていると、次の `destroy` は失敗します。作り直しを繰り返すときは、古い `<name>-final` を確かめてから消すか名前を変えてください
 - dev1 は学習・試作用で、消してよい前提なので `true`（取らない）です。dev1 のデータを残したいときは `skip_db_final_snapshot = false` にしてから `destroy` します
+
+### DB の版（エンジンのバージョン）
+
+- Aurora PostgreSQL の版は `modules/aurora-postgres` の変数 `engine_version`（既定 `16.6`。全環境で同じ）で **マイナー版まで固定** しています
+- DB インスタンスの `auto_minor_version_upgrade`（モジュールの変数。既定 `true` = AWS の既定と同じ）が `true` の間は、
+  AWS がメンテナンスウィンドウでマイナー版（16.x）を自動で上げます。上がった後の `terraform plan` には、クラスターの `engine_version` が
+  実際の版から `16.6` に戻る差分が出ます（版は下げられないので、そのまま `apply` しない）。モジュールの `engine_version` の既定を実際の版に上げる PR を出してください
+- 自動で上げたくないときは `auto_minor_version_upgrade = false` にし、`engine_version` を書き換えて `plan` → レビュー → `apply` で上げます
+- メジャー版（17 など）は自動では上がりません（ローカルの PostgreSQL 16 とそろえるため、上げるときはローカルの `docker-compose.yml` も合わせて上げる）
+- AWS は古いマイナー版のサポートを順に終えます。`apply` の前に、AWS のドキュメント（Aurora PostgreSQL のリリースカレンダー）で `engine_version` の版がまだ使えるかを確かめてください
 
 ### dev1 の VPC エンドポイント
 
@@ -310,6 +322,8 @@ SQS を使わないなら `interface_endpoint_services` から外すと、月 �
 ## CI での確認（apply はしない）
 
 [../.github/workflows/ci.yml](../.github/workflows/ci.yml) の `terraform` ジョブが、`cloud/environments/*` と `cloud/simple` で次を実行します。
+Terraform CLI は **1.13.3** に固定しています（`ci.yml` の `terraform_version`。`versions.tf` の `required_version` は `>= 1.6`）。
+手元で `fmt` の結果が CI と食い違うときは、同じ版を使ってください。
 
 | 確認 | 内容 |
 |---|---|

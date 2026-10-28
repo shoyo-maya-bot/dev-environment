@@ -5,6 +5,9 @@
   README.md の「バッチの終了コード」、local/README.md の終了コードの表、cloud/README.md のジョブフローの表
 - 環境の違い: cloud/README.md の環境の表（NAT・VPC エンドポイント・DB 台数・削除保護・最終スナップショット・API 台数）と、
   cloud/environments/<環境>/main.tf の locals の値. locals に足したキーが表に無いときも失敗にする
+- 終了コード 4 の説明: 形式エラーだけでなく、会員が存在しない行も 4 になることが書いてあるか
+- Terraform CLI の版: ci.yml の terraform_version と README・cloud/README.md の記述
+- S3 のリージョン: 各環境が api・batch のタスクに APP_S3_REGION = var.region を渡しているか
 
 後退: 第 6 回までに、aurora-postgres の最終スナップショットが削除保護と連動しているのに README に書かれていなかった、
 local/README.md の終了コード 8 の表にジョブ ID の誤り（APPE0006）が無かった、などのずれがあった.
@@ -93,6 +96,16 @@ class ExitCodesTest(unittest.TestCase):
         self.assertIn("JobFailed", results[6])
         self.assertIn("JobFailed", results[8])
 
+    def test_warning_descriptions_cover_missing_member(self):
+        # 終了コード 4 は形式エラーの行だけでなく、会員が存在しない行（OrderImportService）でも返る
+        service = (JAVA / "order" / "OrderImportService.java").read_text(encoding="utf-8")
+        self.assertIn("会員が存在しません", service)
+        local_rows = {r[0]: r for r in table_after(read("local/README.md"), r"^\*\*終了コード\*\*:")[1:]}
+        cloud_rows = {r[0]: r for r in table_after(read("cloud/README.md"), r"^## バッチのジョブフロー")[1:]}
+        self.assertIn("会員", local_rows["4"][1])
+        self.assertIn("会員", cloud_rows["4"][1])
+        self.assertIn("会員が存在しない行", read("cloud/modules/batch-workflow/state_machine.tf"))
+
 
 class EnvironmentTableTest(unittest.TestCase):
     # 表の列 → (locals のキー, 表の書き方 → locals の値)
@@ -135,6 +148,31 @@ class EnvironmentTableTest(unittest.TestCase):
                     else:
                         written = next((v for k, v in sorted(mapping.items(), key=lambda kv: -len(kv[0])) if cell.startswith(k)), None)
                     self.assertEqual(written, values[key], f"cloud/README.md の {env} の「{column}」は {cell}、locals の {key} は {values[key]}")
+
+
+
+class TerraformVersionTest(unittest.TestCase):
+    def test_cloud_readme_states_the_ci_terraform_version(self):
+        ci = read(".github/workflows/ci.yml")
+        m = re.search(r'terraform_version:\s*"([\d.]+)"', ci)
+        self.assertIsNotNone(m, "ci.yml で Terraform CLI の版を固定してください")
+        self.assertIn(f"Terraform CLI は **{m.group(1)}** に固定", read("cloud/README.md"))
+        self.assertIn(f"Terraform CLI {m.group(1)}（`ci.yml` で固定）", read("README.md"))
+
+
+class S3RegionTest(unittest.TestCase):
+    def test_every_environment_passes_region_to_api_and_batch(self):
+        envs_dir = ROOT / "cloud" / "environments"
+        for env in sorted(p.name for p in envs_dir.iterdir() if p.is_dir()):
+            main_tf = (envs_dir / env / "main.tf").read_text(encoding="utf-8")
+            for module in ("api", "batch"):
+                with self.subTest(env=env, module=module):
+                    block = re.search(rf'^module "{module}" \{{\n(.*?)^\}}', main_tf, re.M | re.S).group(1)
+                    self.assertRegex(block, r"\bAPP_S3_REGION\s*=\s*var\.region\b")
+
+    def test_s3config_reads_app_s3_region(self):
+        src = (JAVA / "order" / "batch" / "S3Config.java").read_text(encoding="utf-8")
+        self.assertIn("${app.s3.region:", src)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,12 @@ name: exercise-base
 on:
   push:
     branches: [main]
+  # このワークフローと、ここで使う main 側のスクリプトを変える PR でも流す（マージ前に壊れていないかを確かめる）
+  pull_request:
+    paths:
+      - .github/workflows/exercise-base.yml
+      - .github/scripts/e2e.sh
+      - .github/scripts/annotate-tail.sh
   schedule:
     - cron: "37 21 * * 0" # 毎週月曜 06:37（日本時間）
   workflow_dispatch:

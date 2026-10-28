@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>起動例: {@code --spring.profiles.active=local,batch --app.batch.job=JOB0001 --input=s3://sample-bucket/orders.csv}
  *
- * <p>終了コード: 0 正常 / 4 形式エラーの行あり（取込は続行）/ 6 内容の違う重複あり（その行は取り込まずに続行. 人が確かめる）/ 8 異常終了。
+ * <p>終了コード: 0 正常 / 4 形式エラーの行・会員が存在しない行あり（取込は続行）/ 6 内容の違う重複あり（その行は取り込まずに続行. 人が確かめる）/ 8 異常終了。
  * 4 と 6 の両方に当たるときは 6。実案件では運用設計の終了コード体系に合わせる。
  * ジョブ ID の誤り・未指定は {@link com.example.sample.batch.BatchJobGuard} が 8 にする。
  *
