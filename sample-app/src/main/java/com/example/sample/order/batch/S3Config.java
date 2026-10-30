@@ -16,13 +16,16 @@ import software.amazon.awssdk.services.s3.S3ClientBuilder;
  *
  * <p>app.s3.endpoint を指定したとき（ローカル）はエミュレータへ接続する。
  * 未指定（クラウド）は IAM ロール等の標準の認証情報を使う。
+ *
+ * <p>リージョンは app.s3.region（環境変数 APP_S3_REGION。cloud/environments の Terraform が var.region を渡す）→
+ * 環境変数 AWS_REGION → ap-northeast-1 の順に決める。
  */
 @Configuration
 public class S3Config {
 
     @Bean
     public S3Client s3Client(
-            @Value("${app.s3.region:ap-northeast-1}") String region,
+            @Value("${app.s3.region:${AWS_REGION:ap-northeast-1}}") String region,
             @Value("${app.s3.endpoint:}") String endpoint,
             @Value("${app.s3.access-key:test}") String accessKey,
             @Value("${app.s3.secret-key:test}") String secretKey) {

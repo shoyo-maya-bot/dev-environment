@@ -7,7 +7,7 @@ import java.util.List;
  *
  * @param imported 登録した件数
  * @param duplicated 登録済みで内容も同じため飛ばした件数（再実行など。正常）
- * @param errors 形式エラーで飛ばした行（"行番号: 理由"）
+ * @param errors 形式エラー・存在しない会員で飛ばした行（"行番号: 理由"）
  * @param conflicts 登録済みの注文番号で内容（会員・商品・数量）が違うため飛ばした行（"行番号: 理由"）
  */
 public record ImportResult(int imported, int duplicated, List<String> errors, List<String> conflicts) {

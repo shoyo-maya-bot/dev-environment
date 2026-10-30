@@ -67,6 +67,7 @@ module "api" {
   environment = {
     SPRING_PROFILES_ACTIVE = "cloud"
     DB_URL                 = "jdbc:postgresql://${module.db.endpoint}:5432/sampledb"
+    APP_S3_REGION          = var.region # S3Config の app.s3.region（S3 バケットと同じリージョン）
   }
   secrets = {
     DB_PASSWORD = "${local.db_app_secret_arn}:password::"
@@ -88,6 +89,7 @@ module "batch" {
   environment = {
     SPRING_PROFILES_ACTIVE = "cloud,batch"
     DB_URL                 = "jdbc:postgresql://${module.db.endpoint}:5432/sampledb"
+    APP_S3_REGION          = var.region # S3Config の app.s3.region（S3 バケットと同じリージョン）
   }
   secrets = {
     DB_PASSWORD = "${local.db_app_secret_arn}:password::"

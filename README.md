@@ -52,11 +52,11 @@ main への push と PR のたびに動き、イメージや依存の変化に�
 | windows | Windows（`windows-latest`）で `gradlew.bat build` が通ること、PowerShell スクリプトの構文（Windows PowerShell 5.1 で読めるか）と PSScriptAnalyzer |
 | local-compose | `local/docker-compose.yml` の DB と S3 エミュレータが healthy まで起動し、初期データとサンプル CSV が置けること。`.env` でポートを変えてもスクリプトが追随すること、ポートが `127.0.0.1` だけで待ち受けること |
 | e2e | local の DB・S3 エミュレータにつないでアプリを起動し、次を確かめる |
-| terraform | Terraform の書式（`terraform fmt`）、構文（`terraform validate`。`.terraform.lock.hcl` どおりの provider で）、tflint、trivy config（IaC のセキュリティ検査。受け入れた指摘は [cloud/.trivyignore](cloud/.trivyignore) に理由付き）、バッチのジョブフロー（Step Functions）の定義が終了コード 0・4・6・8 を正しく分けること（[test_batch_workflow.py](.github/scripts/test_batch_workflow.py)）、`cloud/simple` の入力検査（[test_simple_variables.py](.github/scripts/test_simple_variables.py)）。どちらも `terraform console` で評価するだけで AWS にはつながない |
+| terraform | Terraform CLI 1.13.3（`ci.yml` で固定）で、書式（`terraform fmt`）、構文（`terraform validate`。`.terraform.lock.hcl` どおりの provider で）、tflint、trivy config（IaC のセキュリティ検査。受け入れた指摘は [cloud/.trivyignore](cloud/.trivyignore) に理由付き）、バッチのジョブフロー（Step Functions）の定義が終了コード 0・4・6・8 を正しく分けること（[test_batch_workflow.py](.github/scripts/test_batch_workflow.py)）、`cloud/simple` の入力検査（[test_simple_variables.py](.github/scripts/test_simple_variables.py)）。どちらも `terraform console` で評価するだけで AWS にはつながない |
 | windows-upload-sample | Windows で `local/scripts/upload-sample.ps1` を Windows PowerShell 5.1 と pwsh 7 で実際に実行する。送り先はジョブ内で起動した PUT だけを受け取るモック（[.github/scripts/s3_put_mock.py](.github/scripts/s3_put_mock.py)）で、AWS にはつながない。`.env` の `S3_PORT`・`S3_BUCKET` を読むこと、失敗時に終了コード 1 になること |
 | env-parity | 環境（dev1 / stg / prod）の差が `main.tf` の `locals` の値と環境名だけであること（[.github/scripts/check_env_parity.py](.github/scripts/check_env_parity.py)） |
 | downstream | PR のときだけ。この PR が写し先・引用先（ai-coding の template、learning-materials の教材）に与える影響を、公開リポジトリを clone して base と head で比べ、増えた指摘を警告と Job Summary に出す（[.github/scripts/downstream.sh](.github/scripts/downstream.sh)）。両者は dev-environment の SHA に固定しているので、マージは止めない（`continue-on-error`） |
-| versions | README に書いた版（Java・Spring Boot・MyBatis・Gradle）がビルドファイルと一致すること（[.github/scripts/check_versions.py](.github/scripts/check_versions.py)。Windows でも実行）。README の終了コードと環境の表が、コードと `locals` の値に一致すること（[test_docs_consistency.py](.github/scripts/test_docs_consistency.py)）。スクリプトの bandit |
+| versions | README に書いた版（Java・Spring Boot・MyBatis・Gradle）がビルドファイルと一致すること（[.github/scripts/check_versions.py](.github/scripts/check_versions.py)。Windows でも実行）。README の終了コードと環境の表が、コードと `locals` の値に一致すること、README に書いた Terraform CLI の版が `ci.yml` と一致すること、各環境が ECS に S3 のリージョンを渡していること（[test_docs_consistency.py](.github/scripts/test_docs_consistency.py)）。スクリプトの bandit |
 
 e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
 
@@ -68,7 +68,8 @@ e2e で確かめること（[.github/scripts/e2e.sh](.github/scripts/e2e.sh)）:
 
 [exercise-base.yml](.github/workflows/exercise-base.yml)
 
-教材が使う `exercise-base` ブランチを取り出して、教材の手順どおりに動くことを確かめます（main への push と週 1 回）。
+教材が使う `exercise-base` ブランチを取り出して、教材の手順どおりに動くことを確かめます（main への push と週 1 回。
+加えて、このワークフローか、ここで使う `.github/scripts/e2e.sh`・`annotate-tail.sh` を変える PR のとき）。
 
 - `./gradlew build` が通る
 - API・Karate・取込バッチが、教材に書いた結果を返す
@@ -84,6 +85,7 @@ Actions はコミットの SHA で固定しています（横にバージョン�
 
 | 時期 | 変更 | 影響 |
 |---|---|---|
+| 2026-10 | `cloud/environments/*` が API・バッチのタスクに環境変数 `APP_S3_REGION`（= `var.region`）を渡すようにした。`S3Config` は `app.s3.region` が無ければ `AWS_REGION` を使う | `region` を `ap-northeast-1` 以外にした環境でも、S3 クライアントがそのリージョンを使う。次の `plan` でタスク定義に環境変数が 1 つ増える（`ap-northeast-1` のままなら動きは変わらない） |
 | 2026-10 | バッチのジョブ ID の照合を、ジョブの登録（`@ConditionalOnProperty`）と同じにした（大文字小文字を区別しない・前後の空白を取り除かない） | `--app.batch.job=job0001` は取込の後に終了コード 8 を返していたが、取込の結果（0・4・6）を返すようになった。`" JOB0001"` のように空白が付くと、何も動かずに 0 だったのが 8（APPE0006）になった |
 | 2026-10 | `cloud/modules/aurora-postgres` の最終スナップショットを削除保護から切り離した（変数 `skip_final_snapshot`。既定は取る）。環境の `locals` に `skip_db_final_snapshot` を追加 | stg・prod は削除保護を外して `destroy` しても最終スナップショットが残る。dev1 は今までどおり取らない。今の設定の `plan` に差分は出ない |
 | 2026-10 | `local/docker-compose.yml` の DB・S3 エミュレータを `127.0.0.1` だけで待ち受けるようにした | ほかの PC から、この PC の DB（5432）・S3 エミュレータ（9090）にはつながらなくなった（意図どおり） |

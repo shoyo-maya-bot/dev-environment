@@ -117,7 +117,7 @@ locals {
 
     SucceededWithWarning = {
       Type    = "Succeed"
-      Comment = "終了コード 4（形式エラーの行を飛ばして取込を続けた）. 成功扱い. 飛ばした行はアプリのログ（APPW0001）で確かめる"
+      Comment = "終了コード 4（形式エラーの行・会員が存在しない行を飛ばして取込を続けた）. 成功扱い. 飛ばした行はアプリのログ（APPW0001）で確かめる"
     }
 
     JobFailed = {
